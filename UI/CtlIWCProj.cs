@@ -107,6 +107,11 @@ namespace IWCCadToolsV9.UI
                 txtArch.Text     = proj.Architect;
                 txtCont.Text     = proj.Contractor;
                 txtPM.Text       = proj.PMIni;
+
+                // Auto-sync project data to DWG custom file properties every time
+                // the project context is updated — keeps the file self-describing
+                // without requiring a manual "Sync Title Block" click.
+                try { svc.PersistToDwg(); } catch { /* non-fatal — file may be read-only */ }
             }
             else
             {
@@ -117,8 +122,8 @@ namespace IWCCadToolsV9.UI
             lblOffline.Visible = svc.IsOffline;
             lblOffline.Text    = svc.IsOffline ? "⚠ Offline — showing cached data" : string.Empty;
 
-            // Tab 2 — DWG File Properties (read directly from DWG, not from service,
-            // so we always show what's actually saved in the file)
+            // Tab 2 — DWG File Properties — always re-read from the DWG after
+            // PersistToDwg() so the File Properties tab reflects what was written.
             LoadFileProps();
         }
 
