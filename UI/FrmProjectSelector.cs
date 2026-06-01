@@ -108,18 +108,36 @@ namespace IWCCadToolsV9.UI
             ClearDashPane();
         }
 
-        private void LoadDashes(int projectId)
+        private async Task LoadDashesAsync(int projectId)
         {
+            dgvDashes.DataSource = null;
+            lblDashStatus.Text   = "Loading…";
+            btnOk.Enabled        = false;
+            btnSkipDash.Enabled  = false;
+
+            List<DashRecord>? dashes = null;
+            string? errorMsg = null;
             try
             {
-                _dashes = _repo.GetDashesForProject(projectId).ToList();
-                BindDashes(_dashes);
+                dashes = await Task.Run(() => _repo.GetDashesForProject(projectId).ToList());
             }
             catch (Exception ex)
             {
-                dgvDashes.DataSource = null;
-                lblDashStatus.Text = "Failed to load dashes: " + ex.Message;
+                errorMsg = ex.Message;
             }
+
+            if (errorMsg != null)
+            {
+                lblDashStatus.Text = "⚠ Failed to load dashes: " + errorMsg;
+            }
+            else
+            {
+                _dashes = dashes!;
+                BindDashes(_dashes);
+            }
+
+            btnOk.Enabled       = _selectedProjId != null;
+            btnSkipDash.Enabled = _selectedProjId != null;
         }
 
         private void BindDashes(List<DashRecord> dashes)
@@ -202,8 +220,7 @@ namespace IWCCadToolsV9.UI
         {
             if (lstProjects.SelectedItem is not ListItem<ProjectRecord> item) return;
             _selectedProjId = item.Value.Id;
-            btnSkipDash.Enabled = true;
-            LoadDashes(item.Value.Id);
+            _ = LoadDashesAsync(item.Value.Id);
         }
 
         private void AcceptWithDash()
