@@ -12,7 +12,7 @@ namespace IWCCadToolsV9.Helpers
     /// CSV format (no header row):
     ///   PropertyName,DatasetColumnName
     ///   IWC_ProjNo,              ← empty column → uses built-in logic
-    ///   IWC_Architect,Architect  ← maps to project dataset column
+    ///   IWC_Arch,Architect  ← maps to project dataset column
     /// </summary>
     public static class CustomFileProps
     {
@@ -40,8 +40,8 @@ namespace IWCCadToolsV9.Helpers
                 ["IWC_SeriesName"] = "SeriesName",
 
                 // Project contact fields sourced from dataset columns
-                ["IWC_Architect"]  = "Architect",
-                ["IWC_Contractor"] = "Contractor",
+                ["IWC_Arch"] = "Architect",
+                ["IWC_Cont"] = "Contractor",
                 ["IWC_PMINI"]      = "PMINI",
             };
 

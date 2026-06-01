@@ -25,8 +25,8 @@ namespace IWCCadToolsV9.Helpers
         public const string KeyProjectId   = "IWC_ID";
         public const string KeyProjNum     = "IWC_ProjNo";
         public const string KeyProjName    = "IWC_ProjName";
-        public const string KeyArchitect   = "IWC_Architect";
-        public const string KeyContractor  = "IWC_Contractor";
+        public const string KeyArchitect   = "IWC_Arch";
+        public const string KeyContractor  = "IWC_Cont";
         public const string KeyPMIni       = "IWC_PMINI";
         public const string KeyDashId      = "IWC_SeriesID";
         public const string KeyDashNum     = "IWC_SeriesNo";
