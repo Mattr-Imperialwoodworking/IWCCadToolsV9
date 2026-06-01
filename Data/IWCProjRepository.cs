@@ -35,7 +35,7 @@ namespace IWCCadToolsV9.Data
                        Architect_TBName AS ArchTb, Contractor_TBName AS ContTb,
                        Proj_StartDate, Proj_EstComp, Proj_EstProduction,
                        Proj_EstInstall, Proj_DateActualComplete,
-                       Act_Drafting, Act_Shop, Act_Comp,
+                       Act_Drafting, Act_Shop,
                        LEED, FSC, NAUF, VOC,
                        Proj_Color, SharepointID, Date_Modified
                 FROM dbo.Proj_CompileActive
@@ -67,7 +67,7 @@ namespace IWCCadToolsV9.Data
                        ArchTb, ContTb,
                        Proj_StartDate, Proj_EstComp, Proj_EstProduction,
                        Proj_EstInstall, Proj_DateActualComplete,
-                       Act_Drafting, Act_Shop, Act_Comp,
+                       Act_Drafting, Act_Shop,
                        LEED, FSC, NAUF, VOC,
                        Proj_Color, SharepointID, Date_Modified
                 FROM dbo.Proj_Compile
@@ -315,7 +315,6 @@ namespace IWCCadToolsV9.Data
             ActualComplete    = SafeDate(r, "Proj_DateActualComplete"),
             IsActiveDrafting  = SafeBool(r, "Act_Drafting"),
             IsActiveShop      = SafeBool(r, "Act_Shop"),
-            IsComplete        = SafeBool(r, "Act_Comp"),
             IsLEED  = SafeBool(r, "LEED"),
             IsFSC   = SafeBool(r, "FSC"),
             IsNAUF  = SafeBool(r, "NAUF"),
