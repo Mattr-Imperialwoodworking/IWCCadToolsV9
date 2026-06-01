@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using IWCCadToolsV9.Data;
 using IWCCadToolsV9.Data.Models;
@@ -52,25 +53,47 @@ namespace IWCCadToolsV9.UI
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            LoadProjects();
+            // Return immediately so the form paints before hitting SQL.
+            // The list shows "Loading…" until the background fetch completes.
+            _ = LoadProjectsAsync();
         }
 
         // -----------------------------------------------------------------------
-        // Data load
+        // Data load (async — never blocks the UI thread)
         // -----------------------------------------------------------------------
 
-        private void LoadProjects()
+        private async Task LoadProjectsAsync()
         {
+            lstProjects.Enabled = false;
+            btnOk.Enabled       = false;
+            lblProjectCount.Text = "Loading…";
+
+            List<ProjectRecord>? projects = null;
+            string? errorMsg = null;
             try
             {
-                _allProjects = _repo.GetActiveProjects().ToList();
-                BindProjects(_allProjects);
+                projects = await Task.Run(() => _repo.GetActiveProjects().ToList());
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to load projects:\n" + ex.Message,
+                errorMsg = ex.Message;
+            }
+
+            // Back on the UI thread
+            if (errorMsg != null)
+            {
+                lblProjectCount.Text = "⚠ Failed to load projects";
+                MessageBox.Show("Failed to load projects:\n" + errorMsg,
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+            else
+            {
+                _allProjects = projects!;
+                BindProjects(_allProjects);
+            }
+
+            lstProjects.Enabled = true;
+            btnOk.Enabled       = true;
         }
 
         private void BindProjects(IEnumerable<ProjectRecord> projects)
@@ -258,7 +281,7 @@ namespace IWCCadToolsV9.UI
             Text           = "Select Project & Drawing Series";
             MinimizeBox    = false; MaximizeBox = false;
             FormBorderStyle = FormBorderStyle.Sizable;
-            StartPosition  = FormStartPosition.CenterParent;
+            StartPosition  = FormStartPosition.CenterScreen;
             AcceptButton   = btnOk;
             CancelButton   = btnCancel;
             MinimumSize    = new Size(640, 380);
