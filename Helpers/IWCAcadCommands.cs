@@ -77,25 +77,22 @@ namespace IWCCadToolsV9.Helpers
                 var acadHandle = Application.MainWindow.Handle;
                 if (acadHandle == IntPtr.Zero) return;
 
-                if (!NativeMethods.GetWindowRect(acadHandle, out var acadRect)) return;
+                // Use the work area of the monitor AutoCAD is on.
+                // GetWindowRect on a maximised window returns inflated coords
+                // (Windows extends the frame off-screen), so the monitor work
+                // area gives the true usable pixel rectangle.
+                var screen = System.Windows.Forms.Screen.FromHandle(acadHandle);
+                var wa     = screen.WorkingArea;        // excludes taskbar
 
-                int acadW = acadRect.Right  - acadRect.Left;
-                int acadH = acadRect.Bottom - acadRect.Top;
+                int palW = Math.Max(wa.Width  / 2, 400);
+                int palH = Math.Max(wa.Height / 2, 300);
 
-                // Clamp to the monitor work area so we don't size against the
-                // full virtual desktop when AutoCAD is maximised.
-                acadW = Math.Min(acadW, System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea.Width  ?? acadW);
-                acadH = Math.Min(acadH, System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea.Height ?? acadH);
+                // Center within the monitor work area
+                int palX = wa.Left + (wa.Width  - palW) / 2;
+                int palY = wa.Top  + (wa.Height - palH) / 2;
 
-                int palW = Math.Max(acadW / 2, 400);
-                int palH = Math.Max(acadH / 2, 300);
-
-                // Center over the AutoCAD window
-                int palX = acadRect.Left + (acadW - palW) / 2;
-                int palY = acadRect.Top  + (acadH - palH) / 2;
-
-                // Defer 200 ms so AutoCAD's palette-frame initialisation completes
-                // before we override the position/size.
+                // Defer 200 ms — AutoCAD's palette-frame initialisation runs
+                // after Visible=true and would otherwise override our sizing.
                 var timer = new System.Windows.Forms.Timer { Interval = 200 };
                 timer.Tick += (_, _) =>
                 {
@@ -112,23 +109,28 @@ namespace IWCCadToolsV9.Helpers
         {
             try
             {
-                var paletteHandle = ps.Handle;
-                if (paletteHandle == IntPtr.Zero) return;
+                // ps.Handle is the palette content area.
+                // GA_ROOT (2) walks up to the actual top-level floating frame
+                // (the window that has the title bar and can be freely moved).
+                var contentHandle = ps.Handle;
+                if (contentHandle == IntPtr.Zero) return;
+
+                var frameHandle = NativeMethods.GetAncestor(contentHandle, 2 /* GA_ROOT */);
+                if (frameHandle == IntPtr.Zero) frameHandle = contentHandle;
 
                 const uint SWP_NOZORDER     = 0x0004;
                 const uint SWP_NOACTIVATE   = 0x0010;
-                const uint SWP_FRAMECHANGED = 0x0020;   // forces frame recalc + repaint
+                const uint SWP_FRAMECHANGED = 0x0020;
 
-                NativeMethods.SetWindowPos(paletteHandle, IntPtr.Zero,
+                NativeMethods.SetWindowPos(frameHandle, IntPtr.Zero,
                     x, y, w, h,
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
-                // Force a full repaint so the palette renders correctly without
-                // requiring the user to move it first.
-                const uint RDW_INVALIDATE   = 0x0001;
-                const uint RDW_UPDATENOW    = 0x0100;
-                const uint RDW_ALLCHILDREN  = 0x0080;
-                NativeMethods.RedrawWindow(paletteHandle, IntPtr.Zero, IntPtr.Zero,
+                // Force a full repaint so the palette renders without needing to be moved.
+                const uint RDW_INVALIDATE  = 0x0001;
+                const uint RDW_UPDATENOW   = 0x0100;
+                const uint RDW_ALLCHILDREN = 0x0080;
+                NativeMethods.RedrawWindow(frameHandle, IntPtr.Zero, IntPtr.Zero,
                     RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
             }
             catch { /* best-effort */ }
@@ -179,6 +181,10 @@ namespace IWCCadToolsV9.Helpers
             [return: MarshalAs(UnmanagedType.Bool)]
             internal static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate,
                 IntPtr hrgnUpdate, uint flags);
+
+            // GA_ROOT = 2: returns the root (top-level) window in the parent chain
+            [DllImport("user32.dll", ExactSpelling = true)]
+            internal static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
         }
     }
 }
