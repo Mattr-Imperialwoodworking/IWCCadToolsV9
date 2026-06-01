@@ -108,10 +108,23 @@ namespace IWCCadToolsV9.UI
         {
             SubscribeToNavContext(e.Document);
             if (e.Document != null)
-                ReloadProjects();
+                ReloadFromContext();
         }
 
-        private void OnProjectChanged(object? sender, EventArgs e) => ReloadProjects();
+        private void OnProjectChanged(object? sender, EventArgs e) => ReloadFromContext();
+
+        /// <summary>
+        /// If a project is active in the current context, show only that project.
+        /// Falls back to all active projects when no context project is set.
+        /// </summary>
+        private void ReloadFromContext()
+        {
+            var svc = _currentNavSvc;
+            if (svc?.HasProject == true && svc.Project != null)
+                ReloadForProject(svc.Project.Id, svc.Project.IdNum, svc.Project.Name);
+            else
+                ReloadProjects();
+        }
 
         #region Public API
 
@@ -226,6 +239,55 @@ namespace IWCCadToolsV9.UI
             }
 
             tree.CollapseAll();
+            tree.EndUpdate();
+        }
+
+        /// <summary>
+        /// Shows only the specified project in the tree, expanded so the user
+        /// can immediately drill into its child nodes.  Called when a project
+        /// context is active; no SQL query needed — data comes from the service.
+        /// </summary>
+        private void ReloadForProject(int id, string idNum, string name)
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(() => ReloadForProject(id, idNum, name))); return; }
+
+            tree.BeginUpdate();
+            tree.Nodes.Clear();
+
+            var parent = new TreeNode($"{idNum} - {name}")
+            {
+                ImageKey         = IconKeyFolder,
+                SelectedImageKey = IconKeyFolder,
+                Tag              = ProjectTag.Create(id, int.TryParse(idNum, out var n) ? n : 0, name)
+            };
+
+            foreach (var child in ChildNodeNames)
+            {
+                var childNode = new TreeNode(child)
+                {
+                    ImageKey         = IconKeyDataTable,
+                    SelectedImageKey = IconKeyDataTable,
+                    Tag              = ChildTag.Create(id, child)
+                };
+
+                if (child.Equals("Dash List", StringComparison.OrdinalIgnoreCase))
+                    childNode.Nodes.Add(new TreeNode("...Load Dashes")      { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("DashListLoader")   });
+
+                if (child.Equals("Project Material List", StringComparison.OrdinalIgnoreCase)
+                 || child.Equals("Project Materials List", StringComparison.OrdinalIgnoreCase))
+                    childNode.Nodes.Add(new TreeNode("...Load Materials")   { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("MatListLoader")    });
+
+                if (child.Equals("Project Hardware List", StringComparison.OrdinalIgnoreCase))
+                    childNode.Nodes.Add(new TreeNode("...Load Hardware")    { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("HdwListLoader")    });
+
+                if (child.Equals("Shop Orders List", StringComparison.OrdinalIgnoreCase))
+                    childNode.Nodes.Add(new TreeNode("...Load Shop Orders") { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("ShopOrdersLoader") });
+
+                parent.Nodes.Add(childNode);
+            }
+
+            tree.Nodes.Add(parent);
+            parent.Expand();   // expand the project node so children are immediately visible
             tree.EndUpdate();
         }
 
@@ -1259,7 +1321,7 @@ namespace IWCCadToolsV9.UI
             if (!DesignMode)
                 // Defer past OnCreateControl so the palette window is fully visible
                 // before the background SQL query starts — prevents a blank hang.
-                BeginInvoke(new Action(ReloadProjects));
+                BeginInvoke(new Action(ReloadFromContext));
             else
                 ShowDesignTimePreview();
 
