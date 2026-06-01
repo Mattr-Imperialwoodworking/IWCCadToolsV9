@@ -51,7 +51,6 @@ namespace IWCCadToolsV9.Data.Models
         // Status
         // ---------------------------------------------------------------------------
 
-        public string DashStatus     { get; init; } = string.Empty;
         public bool   IsActive       { get; init; }
         public bool   IsActiveDraft  { get; init; }
         public bool   IsActiveShop   { get; init; }

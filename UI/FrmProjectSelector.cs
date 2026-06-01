@@ -148,7 +148,6 @@ namespace IWCCadToolsV9.UI
                 d.DashId,
                 DashNum  = d.DashNum,
                 Desc     = d.DashDesc,
-                Status   = d.DashStatus,
                 Type     = d.IsSeries ? "Series" : "Component",
                 d.CADIni,
             }).ToList();
@@ -162,8 +161,6 @@ namespace IWCCadToolsV9.UI
                 dgvDashes.Columns["DashNum"].HeaderText = "Number";
             if (dgvDashes.Columns.Contains("Desc"))
                 dgvDashes.Columns["Desc"].HeaderText = "Description";
-            if (dgvDashes.Columns.Contains("Status"))
-                dgvDashes.Columns["Status"].HeaderText = "Status";
             if (dgvDashes.Columns.Contains("Type"))
                 dgvDashes.Columns["Type"].HeaderText = "Type";
             if (dgvDashes.Columns.Contains("CADIni"))
