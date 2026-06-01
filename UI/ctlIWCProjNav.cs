@@ -79,7 +79,14 @@ namespace IWCCadToolsV9.UI
             SetupIcons();
             ConfigureTreeEvents();
             //InitDashFolderContextMenu();
+
+            //CtlIWCProj.ProjectChanged += OnProjectChanged;
+            var doc = Application.DocumentManager.MdiActiveDocument;
+if (doc != null)
+    ProjectContextService.GetOrCreate(doc).ProjectLoaded += OnProjectChanged;
         }
+
+        private void OnProjectChanged(object? sender, EventArgs e) => ReloadProjects();
 
         #region Public API
 

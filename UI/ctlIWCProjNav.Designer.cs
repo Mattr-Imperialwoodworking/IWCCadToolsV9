@@ -11,9 +11,10 @@
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
+            if (disposing)
             {
-                components.Dispose();
+                CtlIWCProj.ProjectChanged -= OnProjectChanged;
+                components?.Dispose();
                 images?.Dispose();
             }
             base.Dispose(disposing);

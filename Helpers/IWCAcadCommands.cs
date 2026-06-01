@@ -1,5 +1,8 @@
+using System;
+using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.Windows;
@@ -17,10 +20,11 @@ namespace IWCCadToolsV9.Helpers
         // Palette state (singleton pattern)
         // ---------------------------------------------------------------------------
 
-        private static PaletteSet?         _paletteSet;
-        private static CtlIWCProj?         _ctlProj;
-        private static ctlIWCProjNav?      _ctlProjNav;
+        private static PaletteSet?           _paletteSet;
+        private static CtlIWCProj?           _ctlProj;
+        private static ctlIWCProjNav?        _ctlProjNav;
         private static ctlIWCBlockBrowserV2? _ctlBlockBrowser;
+        private static bool                  _paletteSized;
 
         // ---------------------------------------------------------------------------
         // Commands
@@ -51,6 +55,45 @@ namespace IWCCadToolsV9.Helpers
             }
 
             _paletteSet.Visible = true;
+
+            // Size only on first show — after that, respect what the user set.
+            // Must run after Visible = true so the HWND exists.
+            if (!_paletteSized)
+            {
+                SizePaletteToAcadWindow(_paletteSet);
+                _paletteSized = true;
+            }
+        }
+
+        // Size and center the palette to 50% of the AutoCAD main window.
+        // Must be called after ps.Visible = true so the palette HWND exists.
+        private static void SizePaletteToAcadWindow(PaletteSet ps)
+        {
+            try
+            {
+                var acadHandle    = Application.MainWindow.Handle;
+                var paletteHandle = ps.Handle;
+                if (acadHandle == IntPtr.Zero || paletteHandle == IntPtr.Zero) return;
+
+                if (!NativeMethods.GetWindowRect(acadHandle, out var acadRect)) return;
+
+                int acadW = acadRect.Right  - acadRect.Left;
+                int acadH = acadRect.Bottom - acadRect.Top;
+
+                int palW = Math.Max(acadW / 2, 400);
+                int palH = Math.Max(acadH / 2, 300);
+
+                // Center over the AutoCAD window.
+                int palX = acadRect.Left + (acadW - palW) / 2;
+                int palY = acadRect.Top  + (acadH - palH) / 2;
+
+                const uint SWP_NOZORDER    = 0x0004;
+                const uint SWP_NOACTIVATE  = 0x0010;
+                NativeMethods.SetWindowPos(paletteHandle, IntPtr.Zero,
+                    palX, palY, palW, palH,
+                    SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            catch { /* sizing is best-effort; palette will use AutoCAD defaults on failure */ }
         }
 
         /// <summary>Unloads the IWCCadToolsV9 DLL from AutoCAD.</summary>
@@ -79,5 +122,20 @@ namespace IWCCadToolsV9.Helpers
 
         public static void SetSystemVariable(string name, object value)
             => Application.SetSystemVariable(name, value);
+
+        private static class NativeMethods
+        {
+            [StructLayout(LayoutKind.Sequential)]
+            internal struct RECT { public int Left, Top, Right, Bottom; }
+
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+                int x, int y, int cx, int cy, uint uFlags);
+        }
     }
 }
