@@ -58,7 +58,6 @@ namespace IWCCadToolsV9.Data.Models
 
         public bool IsActiveDrafting { get; init; }
         public bool IsActiveShop     { get; init; }
-        public bool IsComplete       { get; init; }
 
         // ---------------------------------------------------------------------------
         // Certifications
