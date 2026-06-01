@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup />
+  <ItemGroup>
+    <Compile Update="UI\ctlIWCBlockBrowser.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="UI\ctlIWCBlockBrowserV2.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="UI\ctlIWCCommandButtons.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="UI\CtlIWCProj.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="UI\ctlIWCProjNav.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="UI\CtlIWCTaskTags.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="UI\FrmAddUrlAsset.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\FrmAssemblyEditor.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\GroupPickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\IWCBaseForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\ProjDashSelect.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\ProjSelect.cs">
+      <SubType>Form</SubType>
+    </Compile>
+  </ItemGroup>
+</Project>
