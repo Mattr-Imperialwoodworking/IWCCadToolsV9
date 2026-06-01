@@ -13,7 +13,9 @@
         {
             if (disposing)
             {
-                CtlIWCProj.ProjectChanged -= OnProjectChanged;
+                Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.DocumentActivated -= OnNavDocumentActivated;
+                if (_currentNavSvc != null)
+                    _currentNavSvc.ProjectLoaded -= OnProjectChanged;
                 components?.Dispose();
                 images?.Dispose();
             }

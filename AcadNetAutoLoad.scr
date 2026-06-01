@@ -1,7 +1,7 @@
 ; IWC CAD Tools V9 - AutoCAD Autoload Script
 ; Update the path below to match your actual deployment location.
 NETLOAD
-C:\Users\mattr\OneDrive - Imperial Woodworking Company\04 - Development\IWCCadToolsV9\IWCCadToolsV9\bin\Debug\net8.0-windows\win-x64\IWCCadToolsV9.dll
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\Debug\net8.0-windows\win-x64\IWCCadToolsV9.dll
 ; Launch the palette on load
 IWCStartup
 IWCNetPalette

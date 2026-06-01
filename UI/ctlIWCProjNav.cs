@@ -1,4 +1,5 @@
 ﻿using Autodesk.AutoCAD.GraphicsSystem;
+using IWCCadToolsV9.Core;
 using IWCCadToolsV9.Data;            // adjust if IWCConn lives under Data or Helpers
 using IWCCadToolsV9.Helpers;         // (safe to keep; remove if not used)
 using Microsoft.Data.SqlClient;
@@ -38,6 +39,9 @@ namespace IWCCadToolsV9.UI
 
         // Track current DataView for filtering (optional future use)
         private DataView? _currentView;
+
+        // Tracks the active document's service so we can unsubscribe cleanly
+        private ProjectContextService? _currentNavSvc;
 
         // ---- Child node labels (fixed order) ----
         private static readonly string[] ChildNodeNames = new[]
@@ -80,123 +84,149 @@ namespace IWCCadToolsV9.UI
             ConfigureTreeEvents();
             //InitDashFolderContextMenu();
 
-            //CtlIWCProj.ProjectChanged += OnProjectChanged;
-            var doc = Application.DocumentManager.MdiActiveDocument;
-if (doc != null)
-    ProjectContextService.GetOrCreate(doc).ProjectLoaded += OnProjectChanged;
+            // Subscribe to document switches so the tree refreshes on each drawing
+            Application.DocumentManager.DocumentActivated += OnNavDocumentActivated;
+
+            // Bind to whichever document is active right now
+            SubscribeToNavContext(Application.DocumentManager.MdiActiveDocument);
+        }
+
+        private void SubscribeToNavContext(
+            Autodesk.AutoCAD.ApplicationServices.Document? doc)
+        {
+            if (_currentNavSvc != null)
+                _currentNavSvc.ProjectLoaded -= OnProjectChanged;
+
+            _currentNavSvc = doc == null ? null : ProjectContextService.GetOrCreate(doc);
+
+            if (_currentNavSvc != null)
+                _currentNavSvc.ProjectLoaded += OnProjectChanged;
+        }
+
+        private void OnNavDocumentActivated(object? sender,
+            Autodesk.AutoCAD.ApplicationServices.DocumentCollectionEventArgs e)
+        {
+            SubscribeToNavContext(e.Document);
+            if (e.Document != null)
+                ReloadProjects();
         }
 
         private void OnProjectChanged(object? sender, EventArgs e) => ReloadProjects();
 
         #region Public API
 
+        // Raw row data fetched off the UI thread
+        private readonly record struct ProjectRow(int Id, int IdNum, string Name);
+
         /// <summary>
-        /// Refreshes the left tree from dbo.Proj_CompileActive (ordered by IDNum ASC).
+        /// Refreshes the left tree asynchronously so the UI thread is never blocked
+        /// by the SQL connection timeout.  Safe to call from any thread.
         /// </summary>
         public void ReloadProjects()
         {
-            try
+            // Marshal to the UI thread if called from a background thread
+            // (e.g. from ProjectLoaded event after an async SQL load).
+            if (InvokeRequired) { BeginInvoke(new Action(ReloadProjects)); return; }
+
+            // Show placeholder immediately so the palette feels responsive
+            tree.BeginUpdate();
+            tree.Nodes.Clear();
+            tree.Nodes.Add(new TreeNode("Loading projects…") { ImageKey = IconKeyFolder });
+            tree.EndUpdate();
+
+            // Fetch raw data on a thread-pool thread — never block the UI thread
+            System.Threading.Tasks.Task.Run(() =>
             {
-                tree.BeginUpdate();
-                tree.Nodes.Clear();
-
-                using (var conn = GetOpenSqlConnection())
-                using (var cmd = new SqlCommand(
-                    @"SELECT ID, IDNum, Proj_Name AS ProjName
-                      FROM dbo.Proj_CompileActive 
-                      WHERE Act_Drafting = 1
-                      ORDER BY IDNum ASC;", conn))
-                using (var rdr = cmd.ExecuteReader())
+                List<ProjectRow> rows;
+                string? errorMsg = null;
+                try
                 {
-                    while (rdr.Read())
-                    {
-                        int id = SafeGet<int>(rdr, "ID");
-                        int idNum = SafeGet<int>(rdr, "IDNum");
-                        string name = SafeGet(rdr, "ProjName", fallback: $"Project {idNum}");
-
-                        var parent = new TreeNode($"{idNum.ToString("D4")} - {name}")   // pad to 4 digits (keep 5+ as-is)
-                        {
-                            ImageKey = IconKeyFolder,
-                            SelectedImageKey = IconKeyFolder,
-                            Tag = ProjectTag.Create(id, idNum, name)
-                        };
-
-                        foreach (var child in ChildNodeNames)
-                        {
-                            var childNode = new TreeNode(child)
-                            {
-                                ImageKey = IconKeyDataTable,
-                                SelectedImageKey = IconKeyDataTable,
-                                Tag = ChildTag.Create(id, child)
-                            };
-
-                            // Dash List: lazy loader
-                            if (child.Equals("Dash List", StringComparison.OrdinalIgnoreCase))
-                            {
-                                childNode.Nodes.Add(new TreeNode("...Load Dashes")
-                                {
-                                    ImageKey = IconKeyFolder,
-                                    SelectedImageKey = IconKeyFolder,
-                                    Tag = PlaceholderTag.For("DashListLoader")
-                                });
-                            }
-
-                            // Project Materials: lazy loader
-                            if (child.Equals("Project Material List", StringComparison.OrdinalIgnoreCase)
-                             || child.Equals("Project Materials List", StringComparison.OrdinalIgnoreCase))
-                            {
-                                childNode.Nodes.Add(new TreeNode("...Load Materials")
-                                {
-                                    ImageKey = IconKeyFolder,
-                                    SelectedImageKey = IconKeyFolder,
-                                    Tag = PlaceholderTag.For("MatListLoader")
-                                });
-                            }
-
-                            // Project Hardware: lazy loader
-                            if (child.Equals("Project Hardware List", StringComparison.OrdinalIgnoreCase))
-                            {
-                                childNode.Nodes.Add(new TreeNode("...Load Hardware")
-                                {
-                                    ImageKey = IconKeyFolder,
-                                    SelectedImageKey = IconKeyFolder,
-                                    Tag = PlaceholderTag.For("HdwListLoader")
-                                });
-                            }
-
-                            // Project Shop Orders: lazy loader
-                            if (child.Equals("Shop Orders List", StringComparison.OrdinalIgnoreCase))
-                            {
-                                childNode.Nodes.Add(new TreeNode("...Load Shop Orders")
-                                {
-                                    ImageKey = IconKeyFolder,
-                                    SelectedImageKey = IconKeyFolder,
-                                    Tag = PlaceholderTag.For("ShopOrdersLoader")
-                                });
-                            }
-
-                            parent.Nodes.Add(childNode);
-                        }
-
-                        tree.Nodes.Add(parent);
-                    }
+                    rows = FetchProjectRows();
+                }
+                catch (Exception ex)
+                {
+                    rows     = new List<ProjectRow>();
+                    errorMsg = ex.Message;
                 }
 
-                // keep everything collapsed at startup
-                tree.CollapseAll();
-            }
-            catch (Exception ex)
+                // Marshal tree building back to the UI thread
+                BeginInvoke(new Action(() => PopulateProjectTree(rows, errorMsg)));
+            });
+        }
+
+        /// <summary>Queries the DB on a background thread — no UI access allowed here.</summary>
+        private List<ProjectRow> FetchProjectRows()
+        {
+            var result = new List<ProjectRow>();
+            using var conn = GetOpenSqlConnection();
+            using var cmd  = new SqlCommand(
+                @"SELECT ID, IDNum, Proj_Name AS ProjName
+                  FROM dbo.Proj_CompileActive
+                  WHERE Act_Drafting = 1
+                  ORDER BY IDNum ASC;", conn);
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
             {
-                MessageBox.Show(
-                    $"Failed to load projects:\n{ex.Message}",
-                    "Project Navigator",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                int    id    = SafeGet<int>(rdr, "ID");
+                int    idNum = SafeGet<int>(rdr, "IDNum");
+                string name  = SafeGet(rdr, "ProjName", fallback: $"Project {idNum}");
+                result.Add(new ProjectRow(id, idNum, name));
             }
-            finally
+            return result;
+        }
+
+        /// <summary>Builds TreeNodes and populates the tree — must run on the UI thread.</summary>
+        private void PopulateProjectTree(List<ProjectRow> rows, string? errorMsg)
+        {
+            tree.BeginUpdate();
+            tree.Nodes.Clear();
+
+            if (errorMsg != null)
             {
+                tree.Nodes.Add(new TreeNode($"⚠ Load failed: {errorMsg}") { ImageKey = IconKeyFolder });
                 tree.EndUpdate();
+                return;
             }
+
+            foreach (var row in rows)
+            {
+                var parent = new TreeNode($"{row.IdNum:D4} - {row.Name}")
+                {
+                    ImageKey         = IconKeyFolder,
+                    SelectedImageKey = IconKeyFolder,
+                    Tag              = ProjectTag.Create(row.Id, row.IdNum, row.Name)
+                };
+
+                foreach (var child in ChildNodeNames)
+                {
+                    var childNode = new TreeNode(child)
+                    {
+                        ImageKey         = IconKeyDataTable,
+                        SelectedImageKey = IconKeyDataTable,
+                        Tag              = ChildTag.Create(row.Id, child)
+                    };
+
+                    if (child.Equals("Dash List", StringComparison.OrdinalIgnoreCase))
+                        childNode.Nodes.Add(new TreeNode("...Load Dashes")        { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("DashListLoader")   });
+
+                    if (child.Equals("Project Material List", StringComparison.OrdinalIgnoreCase)
+                     || child.Equals("Project Materials List", StringComparison.OrdinalIgnoreCase))
+                        childNode.Nodes.Add(new TreeNode("...Load Materials")     { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("MatListLoader")    });
+
+                    if (child.Equals("Project Hardware List", StringComparison.OrdinalIgnoreCase))
+                        childNode.Nodes.Add(new TreeNode("...Load Hardware")      { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("HdwListLoader")    });
+
+                    if (child.Equals("Shop Orders List", StringComparison.OrdinalIgnoreCase))
+                        childNode.Nodes.Add(new TreeNode("...Load Shop Orders")   { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("ShopOrdersLoader") });
+
+                    parent.Nodes.Add(childNode);
+                }
+
+                tree.Nodes.Add(parent);
+            }
+
+            tree.CollapseAll();
+            tree.EndUpdate();
         }
 
         /// <summary>
@@ -1227,7 +1257,9 @@ if (doc != null)
             base.OnCreateControl();
 
             if (!DesignMode)
-                ReloadProjects();
+                // Defer past OnCreateControl so the palette window is fully visible
+                // before the background SQL query starts — prevents a blank hang.
+                BeginInvoke(new Action(ReloadProjects));
             else
                 ShowDesignTimePreview();
 
