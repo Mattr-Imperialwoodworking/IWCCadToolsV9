@@ -67,33 +67,71 @@ namespace IWCCadToolsV9.Helpers
 
         // Size and center the palette to 50% of the AutoCAD main window.
         // Must be called after ps.Visible = true so the palette HWND exists.
+        // Uses a short deferred timer so AutoCAD has time to finish initialising
+        // its palette frame before we override the position — otherwise AutoCAD's
+        // own layout pass fires after ours and undoes the resize.
         private static void SizePaletteToAcadWindow(PaletteSet ps)
         {
             try
             {
-                var acadHandle    = Application.MainWindow.Handle;
-                var paletteHandle = ps.Handle;
-                if (acadHandle == IntPtr.Zero || paletteHandle == IntPtr.Zero) return;
+                var acadHandle = Application.MainWindow.Handle;
+                if (acadHandle == IntPtr.Zero) return;
 
                 if (!NativeMethods.GetWindowRect(acadHandle, out var acadRect)) return;
 
                 int acadW = acadRect.Right  - acadRect.Left;
                 int acadH = acadRect.Bottom - acadRect.Top;
 
+                // Clamp to the monitor work area so we don't size against the
+                // full virtual desktop when AutoCAD is maximised.
+                acadW = Math.Min(acadW, System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea.Width  ?? acadW);
+                acadH = Math.Min(acadH, System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea.Height ?? acadH);
+
                 int palW = Math.Max(acadW / 2, 400);
                 int palH = Math.Max(acadH / 2, 300);
 
-                // Center over the AutoCAD window.
+                // Center over the AutoCAD window
                 int palX = acadRect.Left + (acadW - palW) / 2;
                 int palY = acadRect.Top  + (acadH - palH) / 2;
 
-                const uint SWP_NOZORDER    = 0x0004;
-                const uint SWP_NOACTIVATE  = 0x0010;
-                NativeMethods.SetWindowPos(paletteHandle, IntPtr.Zero,
-                    palX, palY, palW, palH,
-                    SWP_NOZORDER | SWP_NOACTIVATE);
+                // Defer 200 ms so AutoCAD's palette-frame initialisation completes
+                // before we override the position/size.
+                var timer = new System.Windows.Forms.Timer { Interval = 200 };
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    ApplyPaletteSize(ps, palX, palY, palW, palH);
+                };
+                timer.Start();
             }
-            catch { /* sizing is best-effort; palette will use AutoCAD defaults on failure */ }
+            catch { /* sizing is best-effort */ }
+        }
+
+        private static void ApplyPaletteSize(PaletteSet ps, int x, int y, int w, int h)
+        {
+            try
+            {
+                var paletteHandle = ps.Handle;
+                if (paletteHandle == IntPtr.Zero) return;
+
+                const uint SWP_NOZORDER     = 0x0004;
+                const uint SWP_NOACTIVATE   = 0x0010;
+                const uint SWP_FRAMECHANGED = 0x0020;   // forces frame recalc + repaint
+
+                NativeMethods.SetWindowPos(paletteHandle, IntPtr.Zero,
+                    x, y, w, h,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+                // Force a full repaint so the palette renders correctly without
+                // requiring the user to move it first.
+                const uint RDW_INVALIDATE   = 0x0001;
+                const uint RDW_UPDATENOW    = 0x0100;
+                const uint RDW_ALLCHILDREN  = 0x0080;
+                NativeMethods.RedrawWindow(paletteHandle, IntPtr.Zero, IntPtr.Zero,
+                    RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+            }
+            catch { /* best-effort */ }
         }
 
         /// <summary>Unloads the IWCCadToolsV9 DLL from AutoCAD.</summary>
@@ -136,6 +174,11 @@ namespace IWCCadToolsV9.Helpers
             [return: MarshalAs(UnmanagedType.Bool)]
             internal static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
                 int x, int y, int cx, int cy, uint uFlags);
+
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate,
+                IntPtr hrgnUpdate, uint flags);
         }
     }
 }
