@@ -97,9 +97,9 @@ namespace IWCCadToolsV9.Data.Models
         public bool IsValid => DashId > 0;
 
         /// <summary>True when this dash is a Series-level (parent) row.</summary>
-        public bool IsSeries    => DashType == 2;
+        public bool IsSeries    => DashType == 1;
 
         /// <summary>True when this dash is a Component-level (child) row.</summary>
-        public bool IsComponent => DashType == 1;
+        public bool IsComponent => DashType == 2;
     }
 }
