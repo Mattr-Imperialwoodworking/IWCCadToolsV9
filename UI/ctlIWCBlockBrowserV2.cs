@@ -757,22 +757,26 @@ namespace IWCCadToolsV9.UI
             // Locate the parent BlockTag by walking up from contextNode.
             // For view-folder assets the walk goes: AssetNode → ViewsFolderNode → BlockNode.
             // For direct assembly assets the walk goes: AssetNode → BlockNode (one step).
-            string? assemblyName = null;
+            string? assemblyName   = null;
+            bool parentIsComponent = false;
             TreeNode? n = contextNode;
             while (n != null)
             {
                 if (n.Tag is BlockTag bt && !string.IsNullOrWhiteSpace(bt.Name))
                 {
-                    assemblyName = bt.Name.Trim();
+                    assemblyName      = bt.Name.Trim();
+                    parentIsComponent = bt.IsComponent;
                     break;
                 }
                 n = n.Parent;
             }
 
-            // Compose "AssemblyName.AssetName" (e.g. "Lagrand.Adorne.EL01").
-            // If the assembly name cannot be resolved (shouldn't happen in normal use),
-            // fall back to the bare asset name so insertion still succeeds.
-            string desiredName = string.IsNullOrWhiteSpace(assemblyName)
+            // For simple components (exactly 1 DWG asset, IsComponent == true) the parent
+            // block name and the asset name are the same, so concatenating would produce the
+            // redundant "IWC_SYM.VIEW.IWC_SYM.VIEW" pattern.  Use just the asset name.
+            // For assemblies (multiple assets or explicitly flagged as assembly) prefix with
+            // the parent name: "AssemblyName.AssetName" (e.g. "Lagrand.Adorne.EL01").
+            string desiredName = (parentIsComponent || string.IsNullOrWhiteSpace(assemblyName))
                 ? SanitizeBlockName(baseName)
                 : SanitizeBlockName($"{assemblyName}.{baseName}");
 
