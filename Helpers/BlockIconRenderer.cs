@@ -115,7 +115,7 @@ namespace IWCCadToolsV9.Helpers
             {
                 g.SmoothingMode      = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode    = PixelOffsetMode.Half;
-                g.InterpolationMode  = InterpolationMode.HighQualityBicubic;
+                g.InterpolationMode  = InterpolationMode.HighQualityBilinear;
                 g.CompositingQuality = CompositingQuality.HighQuality;
                 g.Clear(background.Value);
                 g.DrawImage(big,
@@ -172,7 +172,7 @@ namespace IWCCadToolsV9.Helpers
             {
                 g.SmoothingMode      = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode    = PixelOffsetMode.Half;
-                g.InterpolationMode  = InterpolationMode.HighQualityBicubic;
+                g.InterpolationMode  = InterpolationMode.HighQualityBilinear;
                 g.CompositingQuality = CompositingQuality.HighQuality;
                 g.Clear(background.Value);
                 g.DrawImage(big,
@@ -1015,7 +1015,7 @@ namespace IWCCadToolsV9.Helpers
             {
                 g.SmoothingMode      = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode    = PixelOffsetMode.Half;
-                g.InterpolationMode  = InterpolationMode.HighQualityBicubic;
+                g.InterpolationMode  = InterpolationMode.HighQualityBilinear;
                 g.CompositingQuality = CompositingQuality.HighQuality;
                 g.Clear(background);
 

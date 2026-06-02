@@ -5558,10 +5558,10 @@ namespace IWCCadToolsV9.UI
                 // visibility-state entities are automatically excluded.
                 return BlockIconRenderer.RenderBlockIconFromBtrId(
                     db, br.BlockTableRecord,
-                    iconSizePx: 64,
-                    supersampleFactor: 2,
+                    iconSizePx: 128,       // larger stored icon → sharper when displayed at preview size
+                    supersampleFactor: 4,  // 512px canvas → 128px = 4× AA; each stroke is 4× more pixels
                     background: System.Drawing.Color.Black,
-                    finalHairlinePx: 0.35f);
+                    finalHairlinePx: 0.9f);// 0.9 × 4 = 3.6px stroke at canvas → ~0.9px at 128px final
             }
             catch { return null; }
         }
