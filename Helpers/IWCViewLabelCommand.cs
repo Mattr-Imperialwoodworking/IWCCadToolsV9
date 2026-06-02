@@ -316,44 +316,65 @@ namespace IWCCadToolsV9.Helpers
         }
 
         // -----------------------------------------------------------------------
-        // Block loading — import from dbo.Dwg_Block if not in drawing
+        // Block loading — uses same pipeline as Block Browser
+        //
+        // 1. Check if BlockName already exists in the drawing → skip download.
+        // 2. Query dbo.Dwg_BlockAssets for the .dwg asset linked to DbBlockId.
+        // 3. Write bytes to a temp DWG file.
+        // 4. ImportBlockDefinitionFromFile (same method as block browser) with
+        //    DuplicateRecordCloning.Ignore — so an existing definition is never
+        //    overwritten when this command is run.
+        // 5. AttributeFieldHelper.PatchFieldsFromSource preserves any field
+        //    expressions on AttributeDefinitions (e.g. the sheet-number field
+        //    on the LT attribute).
         // -----------------------------------------------------------------------
 
         private static bool EnsureBlockLoaded(Database db, Editor ed)
         {
-            // Check if already present
+            // ── Already in drawing? Skip entirely. ───────────────────────────
             using (var chk = db.TransactionManager.StartTransaction())
             {
                 var bt = (BlockTable)chk.GetObject(db.BlockTableId, OpenMode.ForRead);
-                if (bt.Has(BlockName)) { chk.Commit(); return true; }
+                if (bt.Has(BlockName))
+                {
+                    chk.Commit();
+                    ed.WriteMessage($"\nIWC_VIEW: Block '{BlockName}' already loaded — skipping download.\n");
+                    return true;
+                }
                 chk.Commit();
             }
 
-            // Load DWG bytes from database
-            byte[]? dwgBytes = FetchBlockDwgBytes(DbBlockId);
+            // ── Fetch DWG asset bytes from dbo.Dwg_BlockAssets ───────────────
+            // The block browser stores the DWG file in Dwg_BlockAssets.FileData
+            // (not Dwg_Block.BlockData), one row per asset file.  We want the
+            // first .dwg asset associated with DbBlockId.
+            byte[]? dwgBytes = FetchAssetDwgBytes(DbBlockId);
             if (dwgBytes == null || dwgBytes.Length == 0)
             {
-                ed.WriteMessage($"\nIWC_VIEW: Block data for ID={DbBlockId} not found in database.\n");
+                ed.WriteMessage(
+                    $"\nIWC_VIEW: No .dwg asset found for block ID={DbBlockId} " +
+                    $"in dbo.Dwg_BlockAssets.\n");
                 return false;
             }
 
-            // Write to temp file and import
+            // ── Write to temp file ───────────────────────────────────────────
             string tempPath = Path.Combine(
                 Path.GetTempPath(), $"IWC_Block_{DbBlockId}_{Guid.NewGuid():N}.dwg");
             try
             {
                 File.WriteAllBytes(tempPath, dwgBytes);
 
-                using var sourceDb = new Database(false, true);
-                sourceDb.ReadDwgFile(
-                    tempPath,
-                    FileOpenMode.OpenForReadAndAllShare,
-                    true, null);
-                sourceDb.CloseInput(true);
+                // ── Import block definition (block browser pipeline) ─────────
+                // DuplicateRecordCloning.Ignore: if the block somehow already
+                // exists (race condition) don't overwrite it.
+                IWCBlockImportHelper.ImportBlockDefinition(
+                    db, tempPath, BlockName,
+                    DuplicateRecordCloning.Ignore);
 
-                // db.Insert inserts the model space of sourceDb as a new
-                // block definition named BlockName in db.
-                db.Insert(BlockName, sourceDb, true);
+                // Preserve field expressions on AttributeDefinitions (e.g. LT
+                // sheet-number field).  Same call as block browser's first-insert path.
+                AttributeFieldHelper.PatchFieldsFromSource(db, tempPath, BlockName);
+
                 return true;
             }
             catch (System.Exception ex)
@@ -367,17 +388,24 @@ namespace IWCCadToolsV9.Helpers
             }
         }
 
-        private static byte[]? FetchBlockDwgBytes(int blockId)
+        /// <summary>
+        /// Queries dbo.Dwg_BlockAssets for the first .dwg file asset belonging
+        /// to the given block ID.  Returns the raw DWG bytes, or null if not found.
+        /// </summary>
+        private static byte[]? FetchAssetDwgBytes(int blockId)
         {
             try
             {
                 using var conn = IWCConn.GetSqlConnection();
                 conn.Open();
-                using var cmd = new SqlCommand(
-                    "SELECT BlockData FROM dbo.Dwg_Block WHERE ID = @id;", conn);
-                cmd.Parameters.AddWithValue("@id", blockId);
-                var result = cmd.ExecuteScalar();
-                return result as byte[];
+                using var cmd = new SqlCommand(@"
+                    SELECT TOP 1 FileData
+                    FROM   dbo.Dwg_BlockAssets
+                    WHERE  BlockID   = @bid
+                      AND  FileType  = '.dwg'
+                    ORDER BY ID ASC;", conn);
+                cmd.Parameters.AddWithValue("@bid", blockId);
+                return cmd.ExecuteScalar() as byte[];
             }
             catch { return null; }
         }
