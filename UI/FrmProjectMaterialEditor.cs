@@ -194,12 +194,13 @@ namespace IWCCadToolsV9.UI
             using var conn = IWCConn.GetSqlConnection();
             conn.Open();
             using var cmd = new SqlCommand(@"
-                INSERT INTO dbo.Proj_MatCompile (ProjID, MatNo, MatDesc, MatGroup)
+                INSERT INTO dbo.Proj_Mat
+                    (Proj_ID, MatNo, MatDesc, MatGroup, ItemUpdate)
                 OUTPUT INSERTED.ID
-                VALUES (@pid, @no, @desc, @grp);", conn);
+                VALUES (@pid, @no, @desc, @grp, CAST(GETDATE() AS date));", conn);
             cmd.Parameters.AddWithValue("@pid",  projectId);
-            cmd.Parameters.AddWithValue("@no",   matNo);
-            cmd.Parameters.AddWithValue("@desc", matDesc);
+            cmd.Parameters.AddWithValue("@no",   (object?)matNo   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@desc", (object?)matDesc ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@grp",  groupId);
             return Convert.ToInt32(cmd.ExecuteScalar());
         }
@@ -209,14 +210,15 @@ namespace IWCCadToolsV9.UI
             using var conn = IWCConn.GetSqlConnection();
             conn.Open();
             using var cmd = new SqlCommand(@"
-                UPDATE dbo.Proj_MatCompile
-                SET MatNo    = @no,
-                    MatDesc  = @desc,
-                    MatGroup = @grp
+                UPDATE dbo.Proj_Mat
+                SET MatNo      = @no,
+                    MatDesc    = @desc,
+                    MatGroup   = @grp,
+                    ItemUpdate = CAST(GETDATE() AS date)
                 WHERE ID = @id;", conn);
             cmd.Parameters.AddWithValue("@id",   itemId);
-            cmd.Parameters.AddWithValue("@no",   matNo);
-            cmd.Parameters.AddWithValue("@desc", matDesc);
+            cmd.Parameters.AddWithValue("@no",   (object?)matNo   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@desc", (object?)matDesc ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@grp",  groupId);
             cmd.ExecuteNonQuery();
         }
