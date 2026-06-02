@@ -176,25 +176,41 @@ namespace IWCCadToolsV9.UI
             btnSave.Enabled = false;
 
             string next;
+            int pid = _projectId;
             try
             {
-                next = await Task.Run(() => ComputeNextHdwNo(grp.Id, grp.GroupTag));
+                next = await Task.Run(() => ComputeNextHdwNo(grp.Id, grp.GroupTag, pid));
+            }
+            catch (InvalidOperationException ex)
+            {
+                next = $"(full: {ex.Message.Split('(')[0].Trim()})";
+                btnSave.Enabled = false;   // can't add more to this group
+                txtHdwNo.Text   = next;
+                return;
             }
             catch
             {
-                next = $"{grp.GroupTag}01";   // safe fallback
+                next = $"{grp.GroupTag}01";   // safe fallback on connection error
             }
 
             txtHdwNo.Text   = next;
             btnSave.Enabled = true;
         }
 
-        private static string ComputeNextHdwNo(int groupId, string groupTag)
+        private static string ComputeNextHdwNo(int groupId, string groupTag,
+            int projectId = 0)
         {
             using var conn = IWCConn.GetSqlConnection();
             conn.Open();
-            using var cmd = new SqlCommand(
-                "SELECT HdwNo FROM dbo.Proj_Hdw WHERE HdwGroup = @gid;", conn);
+
+            // Filter by both project and group so numbers are scoped per project.
+            // Numbers 50+ are reserved for stock hardware — only consider 01-48.
+            using var cmd = new SqlCommand(@"
+                SELECT HdwNo
+                FROM   dbo.Proj_Hdw
+                WHERE  Proj_ID   = @pid
+                  AND  HdwGroup  = @gid;", conn);
+            cmd.Parameters.AddWithValue("@pid", projectId);
             cmd.Parameters.AddWithValue("@gid", groupId);
 
             int maxSeq = 0;
@@ -206,12 +222,17 @@ namespace IWCCadToolsV9.UI
                     if (no.StartsWith(groupTag, StringComparison.OrdinalIgnoreCase))
                     {
                         string suffix = no.Substring(groupTag.Length);
-                        if (int.TryParse(suffix, out int seq))
+                        if (int.TryParse(suffix, out int seq) && seq < 50)  // ignore reserved ≥50
                             maxSeq = Math.Max(maxSeq, seq);
                     }
                 }
 
             int next = maxSeq + 1;
+            if (next >= 50)
+                throw new InvalidOperationException(
+                    $"No available hardware numbers remain in group {groupTag} " +
+                    $"for this project (numbers 01–48 are all in use; 50+ are reserved for stock).");
+
             return groupTag + (next < 10 ? $"0{next}" : next.ToString());
         }
 
@@ -401,7 +422,7 @@ namespace IWCCadToolsV9.UI
         private static (int newId, string hdwNo) InsertHardware(int projectId, SaveArgs a)
         {
             // HdwNo was computed and shown in the dialog at load time — use it directly.
-            string hdwNo = a.HdwNo ?? ComputeNextHdwNo(a.GroupId, a.GroupTag ?? "H");
+            string hdwNo = a.HdwNo ?? ComputeNextHdwNo(a.GroupId, a.GroupTag ?? "H", projectId);
 
             using var conn = IWCConn.GetSqlConnection();
             conn.Open();
