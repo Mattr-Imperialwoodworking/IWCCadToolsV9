@@ -5535,87 +5535,35 @@ namespace IWCCadToolsV9.UI
 
         /// <summary>
         /// Renders a block icon showing ONLY the geometry that is currently visible
-        /// on screen.
+        /// on screen (respects dynamic-block visibility states).
         ///
-        /// Strategy:
-        ///   1. ExportBlockSnapshotFromReference() "bakes" the current dynamic-block
-        ///      state into a flat DWG whose model space contains only the visible
-        ///      entities — identical to what AutoCAD draws on screen.
-        ///   2. That DWG is loaded into a temp Database and inserted into the active
-        ///      drawing's DB under a temp block name using Database.Insert().
-        ///   3. BlockIconRenderer renders from that temp block (single clean state).
-        ///   4. The temp block is erased from the drawing DB.
+        /// For a dynamic block, <c>br.BlockTableRecord</c> is the anonymous BTR
+        /// (*U###) that AutoCAD maintains for the current property values.  The
+        /// entities within it that are hidden by the active visibility state have
+        /// <c>Entity.Visible == false</c>.  <see cref="BlockIconRenderer.RenderBlockIconFromBtrId"/>
+        /// filters on that flag, so only the currently-visible geometry is rendered.
         ///
-        /// This is the only reliable method for dynamic blocks with visibility states:
-        /// neither the named BTR nor the anonymous BTR approach works because
-        /// visibility-state filtering is applied by AutoCAD's action engine at display
-        /// time, not stored as simple entity visibility flags in the BTR.
+        /// For regular (non-dynamic) blocks, <c>br.BlockTableRecord</c> is the
+        /// named BTR and all entities have <c>Visible == true</c>, so the result
+        /// is identical to <see cref="BlockIconRenderer.RenderBlockIconPng"/>.
         /// </summary>
-        private byte[]? RenderIconForCurrentState(
+        private static byte[]? RenderIconForCurrentState(
             Database db, BlockReference br)
         {
-            string? snapPath = null;
             try
             {
-                // ── Step 1: export only the currently-visible geometry ────────
-                snapPath = ExportBlockSnapshotFromReference(
-                    db, br, IconRenderTempBtr,
-                    Autodesk.AutoCAD.Geometry.Point3d.Origin);
-
-                if (string.IsNullOrEmpty(snapPath) ||
-                    !System.IO.File.Exists(snapPath)) return null;
-
-                // ── Step 2: import snapshot into main DB as temp block ────────
-                // Database.Insert(name, sourceDb, ...) uses the model space of
-                // sourceDb as the content of the new block — exactly what
-                // ExportBlockSnapshotFromReference places in model space.
-                using (var snapDb = new Database(false, true))
-                {
-                    snapDb.ReadDwgFile(snapPath,
-                        FileOpenMode.OpenForReadAndAllShare, true, null);
-                    snapDb.CloseInput(true);
-                    db.Insert(IconRenderTempBtr, snapDb, true);
-                }
-
-                // ── Step 3: render from temp block ───────────────────────────
-                byte[]? png = null;
-                try
-                {
-                    png = BlockIconRenderer.RenderBlockIconPng(
-                        db, IconRenderTempBtr,
-                        iconSizePx: 64,
-                        supersampleFactor: 2,
-                        background: System.Drawing.Color.Black,
-                        finalHairlinePx: 0.35f);
-                }
-                catch { }
-
-                // ── Step 4: clean up temp block from main DB ─────────────────
-                using (var tr = db.TransactionManager.StartTransaction())
-                {
-                    var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                    if (bt.Has(IconRenderTempBtr))
-                    {
-                        var tmpBtr = (BlockTableRecord)tr.GetObject(
-                            bt[IconRenderTempBtr], OpenMode.ForWrite);
-                        var ids = new System.Collections.Generic.List<ObjectId>();
-                        foreach (ObjectId eid in tmpBtr) ids.Add(eid);
-                        foreach (var eid in ids)
-                            try { ((DBObject)tr.GetObject(eid, OpenMode.ForWrite)).Erase(); }
-                            catch { }
-                        tmpBtr.Erase();
-                    }
-                    tr.Commit();
-                }
-
-                return png;
+                // br.BlockTableRecord = anonymous BTR for dynamic blocks,
+                //                       named BTR for regular blocks.
+                // RenderBlockIconFromBtrId respects Entity.Visible so hidden
+                // visibility-state entities are automatically excluded.
+                return BlockIconRenderer.RenderBlockIconFromBtrId(
+                    db, br.BlockTableRecord,
+                    iconSizePx: 64,
+                    supersampleFactor: 2,
+                    background: System.Drawing.Color.Black,
+                    finalHairlinePx: 0.35f);
             }
             catch { return null; }
-            finally
-            {
-                if (snapPath != null)
-                    try { System.IO.File.Delete(snapPath); } catch { }
-            }
         }
 
         // -----------------------------------------------------------------------

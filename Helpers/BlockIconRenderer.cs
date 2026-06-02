@@ -129,6 +129,63 @@ namespace IWCCadToolsV9.Helpers
             return ms.ToArray();
         }
 
+        /// <summary>
+        /// Renders a block definition identified by its <see cref="ObjectId"/> to
+        /// a PNG byte array.  Use this overload to render anonymous BTRs (e.g.
+        /// <c>br.BlockTableRecord</c> for a dynamic block) where no named lookup
+        /// is possible.  The <see cref="Entity.Visible"/> filter is applied so
+        /// only entities visible in the current dynamic-block state are rendered.
+        /// </summary>
+        public static byte[]? RenderBlockIconFromBtrId(
+            Database db,
+            ObjectId btrId,
+            int      iconSizePx        = 64,
+            int      supersampleFactor = 2,
+            Color?   background        = null,
+            float    finalHairlinePx   = 0.35f)
+        {
+            background ??= Color.Black;
+            int canvas = Math.Max(16, iconSizePx * Math.Max(1, supersampleFactor));
+
+            using var tr = db.TransactionManager.StartTransaction();
+
+            if (btrId.IsNull || !btrId.IsValid) return null;
+            var btr = tr.GetObject(btrId, OpenMode.ForRead) as BlockTableRecord;
+            if (btr == null) return null;
+
+            Extents3d? ext = ComputeBlockExtents(btr, tr, includeAttDef: false);
+            if (!ext.HasValue) return null;
+
+            var (scale, offsetX, offsetY) = ComputeTransform(ext.Value, canvas);
+            PointF Xform(Point3d w) => new(
+                (float)(offsetX + (w.X - ext.Value.MinPoint.X) * scale),
+                (float)(canvas  - (offsetY + (w.Y - ext.Value.MinPoint.Y) * scale)));
+
+            float superStroke = Math.Max(finalHairlinePx * supersampleFactor, 0.5f);
+
+            using var big = RenderToBitmap(btr, tr, canvas, background.Value,
+                Xform, superStroke, scale);
+
+            using var final = new Bitmap(iconSizePx, iconSizePx, PixelFormat.Format32bppArgb);
+            final.SetResolution(300, 300);
+            using (var g = Graphics.FromImage(final))
+            {
+                g.SmoothingMode      = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode    = PixelOffsetMode.Half;
+                g.InterpolationMode  = InterpolationMode.HighQualityBicubic;
+                g.CompositingQuality = CompositingQuality.HighQuality;
+                g.Clear(background.Value);
+                g.DrawImage(big,
+                    new Rectangle(0, 0, iconSizePx, iconSizePx),
+                    new Rectangle(0, 0, big.Width, big.Height),
+                    GraphicsUnit.Pixel);
+            }
+
+            using var ms = new MemoryStream();
+            final.Save(ms, ImageFormat.Png);
+            return ms.ToArray();
+        }
+
         // -----------------------------------------------------------------------
         // Private render helpers
         // -----------------------------------------------------------------------
@@ -158,14 +215,16 @@ namespace IWCCadToolsV9.Helpers
             foreach (ObjectId id in btr)
             {
                 var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent != null) RenderEntityFill(ent, ctx, Matrix3d.Identity);
+                // Entity.Visible == false means the entity is hidden by a dynamic block
+                // visibility state — skip it so we only render what is currently shown.
+                if (ent != null && ent.Visible) RenderEntityFill(ent, ctx, Matrix3d.Identity);
             }
 
             // Pass 2: strokes and text
             foreach (ObjectId id in btr)
             {
                 var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent != null) RenderEntityStroke(ent, ctx, Matrix3d.Identity, worldScale);
+                if (ent != null && ent.Visible) RenderEntityStroke(ent, ctx, Matrix3d.Identity, worldScale);
             }
 
             return bmp;
