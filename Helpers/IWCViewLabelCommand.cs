@@ -359,20 +359,13 @@ namespace IWCCadToolsV9.Helpers
             {
                 File.WriteAllBytes(tempPath, dwgBytes);
 
-                // Database.Insert() is the standard AutoCAD import path:
-                // it reads the source DWG and adds its model-space content as a
-                // new named block definition in db — identical to the INSERT
-                // command's external-DWG behaviour.
-                using (var sourceDb = new Database(false, true))
-                {
-                    sourceDb.ReadDwgFile(
-                        tempPath, FileOpenMode.OpenForReadAndAllShare, true, null);
-                    sourceDb.CloseInput(true);
-                    db.Insert(BlockName, sourceDb, true);
-                }
+                // Use the exact same import pipeline as ctlIWCBlockBrowserV2:
+                // WblockCloneObjects via IWCBlockImportHelper.ImportBlockDefinition,
+                // then AttributeFieldHelper.PatchFieldsFromSource to restore
+                // field expressions on AttributeDefinitions (e.g. LT sheet field).
+                IWCBlockImportHelper.ImportBlockDefinition(
+                    db, tempPath, BlockName, DuplicateRecordCloning.Ignore);
 
-                // Restore field expressions (e.g. LT sheet-number field) that
-                // Database.Insert may not preserve in the AttributeDefinitions.
                 AttributeFieldHelper.PatchFieldsFromSource(db, tempPath, BlockName);
 
                 return true;
