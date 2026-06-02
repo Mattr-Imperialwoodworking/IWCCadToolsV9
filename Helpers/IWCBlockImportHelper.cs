@@ -133,24 +133,35 @@ namespace IWCCadToolsV9.Helpers
         // Helpers
         // -----------------------------------------------------------------------
 
+        /// <summary>
+        /// Collects the BlockTableRecord ObjectId for <paramref name="btrId"/> and
+        /// recurses into any nested block definitions it references.
+        ///
+        /// IMPORTANT: only BTR ObjectIds are added — never the entity ObjectIds
+        /// that live inside a BTR.  WblockCloneObjects copies a BTR together with
+        /// all of its contained entities automatically; adding the entity IDs
+        /// separately causes them to be cloned twice, outside their parent BTR
+        /// context, which makes the block geometry invisible when inserted.
+        /// </summary>
         private static void CollectClosure(Database srcDb, ObjectId btrId,
             Transaction tr, ObjectIdCollection collector)
         {
             if (collector.Contains(btrId)) return;
-            collector.Add(btrId);
+            collector.Add(btrId);   // add the BTR definition — entities are included implicitly
 
             var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
             foreach (ObjectId entId in btr)
             {
-                collector.Add(entId);
+                // Only recurse to collect nested block definitions,
+                // never add the entity ObjectId itself.
                 var bref = tr.GetObject(entId, OpenMode.ForRead) as BlockReference;
                 if (bref == null) continue;
 
-                ObjectId nested = bref.DynamicBlockTableRecord.IsNull
-                    ? bref.BlockTableRecord
-                    : bref.DynamicBlockTableRecord;
+                ObjectId nested = !bref.DynamicBlockTableRecord.IsNull
+                    ? bref.DynamicBlockTableRecord
+                    : bref.BlockTableRecord;
 
-                if (!nested.IsNull && !collector.Contains(nested))
+                if (!nested.IsNull)
                     CollectClosure(srcDb, nested, tr, collector);
             }
         }
