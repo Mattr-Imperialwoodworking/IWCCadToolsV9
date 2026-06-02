@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using Autodesk.AutoCAD.ApplicationServices;
+using IWCCadToolsV9.Data;
 using IWCCadToolsV9.Data.Models;
+using Microsoft.Data.SqlClient;
 
 namespace IWCCadToolsV9.Helpers
 {
@@ -27,7 +29,7 @@ namespace IWCCadToolsV9.Helpers
         public const string KeyProjName    = "IWC_ProjName";
         public const string KeyArchitect   = "IWC_Arch";
         public const string KeyContractor  = "IWC_Cont";
-        public const string KeyPMIni       = "IWC_PMINI";
+        public const string KeyPMIni       = "IWC_PM";
         public const string KeyDashId      = "IWC_SeriesID";
         public const string KeyDashNum     = "IWC_SeriesNo";
         public const string KeyDashName    = "IWC_SeriesName";
@@ -50,8 +52,8 @@ namespace IWCCadToolsV9.Helpers
                 [KeyProjectId]  = project.Id.ToString(),
                 [KeyProjNum]    = project.IdNum,
                 [KeyProjName]   = project.Name,
-                [KeyArchitect]  = project.ArchTb,      // titleblock-formatted name
-                [KeyContractor] = project.ContTb,      // titleblock-formatted name
+                [KeyArchitect]  = project.ArchTb,
+                [KeyContractor] = project.ContTb,
                 [KeyPMIni]      = project.PMIni,
             };
 
@@ -62,13 +64,33 @@ namespace IWCCadToolsV9.Helpers
                 values[KeyDashName]= dash.DashDesc;
             }
 
+            // IWC_Date — set once when first synced; never overwritten so it
+            // preserves the original drawing date across future syncs.
+            string? existingDate = AcadFilePropHelper.GetCustomProperty(KeyDate);
+            if (string.IsNullOrWhiteSpace(existingDate) ||
+                string.Equals(existingDate, "NA", StringComparison.OrdinalIgnoreCase))
+            {
+                values[KeyDate] = DateTime.Today.ToString("MM/dd/yyyy");
+            }
+
+            // IWC_Draft — drafter initials from Mng_Users matched to the current
+            // Windows login. Set once; not overwritten on subsequent syncs.
+            string? existingDraft = AcadFilePropHelper.GetCustomProperty(KeyDraftBy);
+            if (string.IsNullOrWhiteSpace(existingDraft) ||
+                string.Equals(existingDraft, "NA", StringComparison.OrdinalIgnoreCase))
+            {
+                string? ini = LookupCurrentUserInitials();
+                if (!string.IsNullOrWhiteSpace(ini))
+                    values[KeyDraftBy] = ini;
+            }
+
             // JSON cache for offline open
             try
             {
                 var json = JsonSerializer.Serialize(project);
                 values[KeyCachedJson] = json;
             }
-            catch { /* non-fatal — cache will just be missing */ }
+            catch { /* non-fatal */ }
 
             using (doc.LockDocument())
             {
@@ -169,6 +191,35 @@ namespace IWCCadToolsV9.Helpers
             using (doc.LockDocument())
             {
                 AcadFilePropHelper.EnsurePropertiesExist(keys);
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // User lookup
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Returns the UserIni for the current Windows login from dbo.Mng_Users,
+        /// or null if the user is not found or the DB is unreachable.
+        /// Matches UserLogin against Environment.UserName (case-insensitive).
+        /// </summary>
+        private static string? LookupCurrentUserInitials()
+        {
+            try
+            {
+                string login = Environment.UserName;
+                using var conn = IWCConn.GetSqlConnection();
+                conn.Open();
+                using var cmd = new SqlCommand(
+                    "SELECT TOP 1 UserIni FROM dbo.Mng_Users " +
+                    "WHERE UserLogin = @login AND UserStatus = 'Active';", conn);
+                cmd.Parameters.AddWithValue("@login", login);
+                var result = cmd.ExecuteScalar();
+                return result as string;
+            }
+            catch
+            {
+                return null;   // non-fatal — IWC_Draft will remain "NA" until next sync
             }
         }
     }

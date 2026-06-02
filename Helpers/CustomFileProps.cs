@@ -42,7 +42,7 @@ namespace IWCCadToolsV9.Helpers
                 // Project contact fields sourced from dataset columns
                 ["IWC_Arch"] = "Architect",
                 ["IWC_Cont"] = "Contractor",
-                ["IWC_PMINI"]      = "PMINI",
+                ["IWC_PM"]         = "PMINI",
             };
 
         // ---------------------------------------------------------------------------
