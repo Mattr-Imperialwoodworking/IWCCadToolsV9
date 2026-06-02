@@ -194,23 +194,7 @@ namespace IWCCadToolsV9.Helpers
                             break;
 
                         case "SCALE":
-                            // Build a live field linked to the viewport's annotation scale
-                            // so the attribute updates automatically when the viewport scale changes.
-                            // Format mirrors the user-defined standard:
-                            //   %<\AcObjProp Object(%<\_ObjId {id}>%).AnnotationScale \f "%tc1">%
-                            // _ObjId uses the ObjectId's pointer value (OldIdPtr).
-                            // Falls back to static text if field creation fails.
-                            try
-                            {
-                                long vpPtr = vp.ObjectId.OldIdPtr.ToInt64();
-                                string scaleCode =
-                                    $@"%<\AcObjProp Object(%<\_ObjId {vpPtr}>%).AnnotationScale \f ""%tc1"">%";
-                                ar.SetField(new Field(scaleCode));
-                            }
-                            catch
-                            {
-                                ar.TextString = scaleName;  // static fallback
-                            }
+                            ar.TextString = scaleName;
                             break;
 
                         case "ARCHREF":
