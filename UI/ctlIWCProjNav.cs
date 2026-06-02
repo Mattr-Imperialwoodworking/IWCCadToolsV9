@@ -34,6 +34,11 @@ namespace IWCCadToolsV9.UI
         private ContextMenuStrip? _dashFolderMenu;
         private ToolStripMenuItem? _miDashFolderRefresh;
 
+        // Material context menu
+        private ContextMenuStrip  _matMenu          = new ContextMenuStrip();
+        private ToolStripMenuItem _miAddMaterial     = new ToolStripMenuItem("Add New Material");
+        private ToolStripMenuItem _miEditMaterial    = new ToolStripMenuItem("Edit Material");
+
         // Data binding
         private readonly BindingSource _gridBinding = new BindingSource();
 
@@ -82,6 +87,7 @@ namespace IWCCadToolsV9.UI
 
             SetupIcons();
             ConfigureTreeEvents();
+            InitMaterialContextMenu();
             //InitDashFolderContextMenu();
 
             // Subscribe to document switches so the tree refreshes on each drawing
@@ -125,6 +131,124 @@ namespace IWCCadToolsV9.UI
             else
                 ReloadProjects();
         }
+
+        #region Material Context Menu
+
+        private void InitMaterialContextMenu()
+        {
+            _miAddMaterial.Click  += (_, _) => OnAddMaterial();
+            _miEditMaterial.Click += (_, _) => OnEditMaterial();
+            _matMenu.Items.Add(_miAddMaterial);
+            _matMenu.Items.Add(_miEditMaterial);
+        }
+
+        /// <summary>
+        /// Shows the right context menu based on what node was right-clicked.
+        /// - "Project Material List" ChildTag  → Add New Material
+        /// - MatGroupTag (group folder)         → Add New Material
+        /// - MatItemTag (leaf item)             → Edit Material
+        /// </summary>
+        private void ShowNodeContextMenu(TreeNode? node, System.Drawing.Point location)
+        {
+            if (node == null) return;
+
+            bool isMaterialListNode = node.Tag is ChildTag ct &&
+                (ct.ChildLabel?.Contains("Material", StringComparison.OrdinalIgnoreCase) == true);
+            bool isMaterialGroup = node.Tag is MatGroupTag;
+            bool isMaterialItem  = node.Tag is MatItemTag;
+
+            if (!isMaterialListNode && !isMaterialGroup && !isMaterialItem) return;
+
+            _miAddMaterial.Visible  = isMaterialListNode || isMaterialGroup;
+            _miEditMaterial.Visible = isMaterialItem;
+            _matMenu.Show(tree, location);
+        }
+
+        private void OnAddMaterial()
+        {
+            var node = tree.SelectedNode;
+            if (node == null) return;
+
+            // Resolve project ID and optional pre-selected group
+            int  projectId = 0;
+            int? groupId   = null;
+
+            if (node.Tag is ChildTag ct)
+                projectId = ct.ProjectId;
+            else if (node.Tag is MatGroupTag mgt)
+            {
+                projectId = mgt.ProjectId;
+                groupId   = mgt.GroupId;
+            }
+
+            if (projectId == 0) return;
+
+            using var dlg = new FrmProjectMaterialEditor(projectId, groupId);
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            // Reload the materials branch
+            RefreshMaterialListNode(node, projectId);
+        }
+
+        private void OnEditMaterial()
+        {
+            var node = tree.SelectedNode;
+            if (node?.Tag is not MatItemTag mit) return;
+
+            using var dlg = new FrmProjectMaterialEditor(
+                projectId: mit.ProjectId,
+                itemId:    mit.ItemId,
+                matNo:     mit.MatNo,
+                matDesc:   mit.MatDesc,
+                groupId:   mit.GroupId);
+
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            // Update the node text in-place and reload the branch
+            node.Text = $"{dlg.MatNo} - {dlg.MatDesc}";
+            node.Tag  = MatItemTag.Create(mit.ProjectId, mit.ItemId,
+                dlg.MatGroupId ?? mit.GroupId, dlg.MatNo, dlg.MatDesc);
+
+            RefreshMaterialListNode(node, mit.ProjectId);
+        }
+
+        /// <summary>
+        /// Walks up to the "Project Material List" ChildTag node and forces a full reload.
+        /// </summary>
+        private void RefreshMaterialListNode(TreeNode startNode, int projectId)
+        {
+            // Find the Project Material List ancestor node
+            TreeNode? matListNode = startNode;
+            while (matListNode != null)
+            {
+                if (matListNode.Tag is ChildTag ct &&
+                    ct.ChildLabel?.Contains("Material", StringComparison.OrdinalIgnoreCase) == true)
+                    break;
+                matListNode = matListNode.Parent;
+            }
+
+            if (matListNode == null) return;
+
+            // Collapse, clear, reset placeholder, then re-expand to re-trigger lazy load
+            matListNode.Collapse();
+            matListNode.Nodes.Clear();
+            matListNode.Nodes.Add(new TreeNode("...Load Materials")
+            {
+                ImageKey         = IconKeyFolder,
+                SelectedImageKey = IconKeyFolder,
+                Tag              = PlaceholderTag.For("MatListLoader")
+            });
+
+            // Immediately reload so the user sees fresh data without an extra click
+            try { LoadMaterialsForProject(matListNode, projectId); }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to reload materials:\n{ex.Message}",
+                    "Project Navigator", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        #endregion
 
         #region Public API
 
@@ -484,11 +608,12 @@ namespace IWCCadToolsV9.UI
                 }
             };
 
-            // Right-click selects node (so context menu acts on it)
+            // Right-click selects node and shows appropriate context menu
             tree.NodeMouseClick += (s, e) =>
             {
-                if (e.Button == MouseButtons.Right)
-                    tree.SelectedNode = e.Node;
+                if (e.Button != MouseButtons.Right) return;
+                tree.SelectedNode = e.Node;
+                ShowNodeContextMenu(e.Node, e.Location);
             };
 
             // Double-click toggles expand/collapse
