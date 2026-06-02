@@ -5497,15 +5497,131 @@ namespace IWCCadToolsV9.UI
         }
 
 
+        // -----------------------------------------------------------------------
+        // Duplicate-block validation helpers
+        // -----------------------------------------------------------------------
+
+        private sealed class DupeInfo
+        {
+            public int     Id        { get; init; }
+            public string? BlockName { get; init; }
+            public string? BlockTag  { get; init; }
+            public string? BlockDesc { get; init; }
+        }
+
+        /// <summary>
+        /// Returns all existing blocks whose BlockName or BlockTag matches either
+        /// <paramref name="name"/> or <paramref name="tag"/> (case-insensitive).
+        /// Empty / null values for either field are skipped.
+        /// </summary>
+        private static System.Collections.Generic.List<DupeInfo> FindDuplicateBlocks(
+            string? name, string? tag)
+        {
+            var results = new System.Collections.Generic.List<DupeInfo>();
+            bool checkName = !string.IsNullOrWhiteSpace(name);
+            bool checkTag  = !string.IsNullOrWhiteSpace(tag);
+            if (!checkName && !checkTag) return results;
+
+            try
+            {
+                using var conn = new IWCConn();
+                conn.DBConnect();
+
+                using var cmd = new Microsoft.Data.SqlClient.SqlCommand(@"
+                    SELECT ID,
+                           ISNULL(BlockName, '')  AS BlockName,
+                           ISNULL(BlockTag,  '')  AS BlockTag,
+                           ISNULL(BlockDesc, '')  AS BlockDesc
+                    FROM   dbo.Dwg_Block
+                    WHERE  (@checkName = 1 AND LOWER(BlockName) = LOWER(@name))
+                        OR (@checkTag  = 1 AND LOWER(BlockTag)  = LOWER(@tag));",
+                    conn.OpenConn);
+
+                cmd.Parameters.AddWithValue("@checkName", checkName ? 1 : 0);
+                cmd.Parameters.AddWithValue("@name",      (object?)name ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@checkTag",  checkTag  ? 1 : 0);
+                cmd.Parameters.AddWithValue("@tag",       (object?)tag  ?? DBNull.Value);
+
+                using var rdr = cmd.ExecuteReader();
+                while (rdr.Read())
+                    results.Add(new DupeInfo
+                    {
+                        Id        = rdr.GetInt32(rdr.GetOrdinal("ID")),
+                        BlockName = rdr["BlockName"] as string,
+                        BlockTag  = rdr["BlockTag"]  as string,
+                        BlockDesc = rdr["BlockDesc"] as string,
+                    });
+
+                conn.DBClose();
+            }
+            catch { /* non-fatal — if the check fails, allow the insert */ }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Returns true if <paramref name="node"/> is inside a "Project Specific"
+        /// group node — by walking up through ancestors and checking the group
+        /// name (case-insensitive partial match so variants like "Project-Specific"
+        /// also qualify).
+        /// </summary>
+        private static bool IsInProjectSpecificGroup(TreeNode? node)
+        {
+            var current = node;
+            while (current != null)
+            {
+                if (current.Tag is GroupTag &&
+                    current.Text.IndexOf("Project Specific",
+                        StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+
+                current = current.Parent;
+            }
+            return false;
+        }
+
+        // -----------------------------------------------------------------------
+
         private bool CreateAssemblyViaDialog(out int newBlockId, out string? blockName)
         {
             newBlockId = 0;
             blockName = null;
 
-            using var dlg = new IWCCadToolsV9.UI.FrmAssemblyEditor(); // no conn string needed now
+            using var dlg = new IWCCadToolsV9.UI.FrmAssemblyEditor();
             if (dlg.ShowDialog(this) != DialogResult.OK) return false;
 
             blockName = dlg.BlockNameValue;
+
+            // ── Duplicate name check ──────────────────────────────────────────
+            // "Project Specific" group allows duplicates; all other groups do not.
+            bool isProjectSpecific = IsInProjectSpecificGroup(treeGroups.SelectedNode);
+
+            if (!isProjectSpecific)
+            {
+                var dupes = FindDuplicateBlocks(dlg.BlockNameValue, dlg.BlockTagValue);
+                if (dupes.Count > 0)
+                {
+                    var sb = new System.Text.StringBuilder();
+                    sb.AppendLine("A block with the same name or display name already exists:\n");
+                    foreach (var d in dupes)
+                        sb.AppendLine($"  • [{d.Id}]  {d.BlockName}" +
+                                      (string.IsNullOrWhiteSpace(d.BlockTag) ? "" : $"  /  \"{d.BlockTag}\"") +
+                                      (string.IsNullOrWhiteSpace(d.BlockDesc) ? "" : $"  —  {d.BlockDesc}"));
+
+                    sb.AppendLine("\nDuplicate blocks are only allowed in the \"Project Specific\" folder.");
+                    sb.AppendLine("Do you want to add it anyway?");
+
+                    var answer = MessageBox.Show(
+                        sb.ToString(),
+                        "Duplicate Block Detected",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button2);  // No is default
+
+                    if (answer != DialogResult.Yes) return false;
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
 
             newBlockId = InsertBlock(
                 name:       dlg.BlockNameValue,
