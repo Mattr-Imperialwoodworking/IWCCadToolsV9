@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
+using IWCCadToolsV9.Data;
+using Microsoft.Data.SqlClient;
 
 namespace IWCCadToolsV9.UI
 {
@@ -51,18 +55,30 @@ namespace IWCCadToolsV9.UI
         public string BlockLinkUrlValue    => BlockLinkUrl;
 
         // ---------------------------------------------------------------------------
-        // Dirty-tracking
+        // Dirty-tracking + duplicate-check flag
         // ---------------------------------------------------------------------------
 
         private bool _isDirty;
         private void MarkDirty(object? sender, EventArgs e) => _isDirty = true;
 
+        /// <summary>
+        /// When false (default), saving is blocked if another block already has the
+        /// same BlockName or Display Name.  Set to true for "Project Specific" groups
+        /// where duplicates are intentionally allowed.
+        /// </summary>
+        private readonly bool _allowDuplicates;
+
         // ---------------------------------------------------------------------------
         // Construction – create mode
         // ---------------------------------------------------------------------------
 
-        public FrmAssemblyEditor()
+        /// <param name="allowDuplicates">
+        /// Pass <c>true</c> when adding to the "Project Specific" group to skip the
+        /// duplicate-name check.
+        /// </param>
+        public FrmAssemblyEditor(bool allowDuplicates = false)
         {
+            _allowDuplicates = allowDuplicates;
             InitializeComponent();
             WireEvents();
             UpdateLinkPreview();
@@ -151,7 +167,73 @@ namespace IWCCadToolsV9.UI
                 txtName.Focus();
                 return false;
             }
+
+            // Duplicate check — only in Add mode and when duplicates are not allowed
+            if (BlockId == null && !_allowDuplicates)
+            {
+                var dupes = FindDuplicateBlocks(txtName.Text.Trim(), txtTag.Text.Trim());
+                if (dupes.Count > 0)
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("A block with the same Block Name or Display Name already exists:\n");
+                    foreach (var d in dupes)
+                        sb.AppendLine($"  • [{d.Id}]  {d.BlockName}" +
+                            (string.IsNullOrWhiteSpace(d.Tag)  ? "" : $"  /  \"{d.Tag}\"") +
+                            (string.IsNullOrWhiteSpace(d.Desc) ? "" : $"  —  {d.Desc}"));
+                    sb.AppendLine("\nTo allow duplicates, save this block under the \"Project Specific\" folder.");
+
+                    MessageBox.Show(sb.ToString(), "Duplicate Block Name",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    txtName.Focus();
+                    return false;
+                }
+            }
+
             return true;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Duplicate-block check
+        // ---------------------------------------------------------------------------
+
+        private sealed record DupeInfo(int Id, string? BlockName, string? Tag, string? Desc);
+
+        private static List<DupeInfo> FindDuplicateBlocks(string name, string tag)
+        {
+            var results = new List<DupeInfo>();
+            bool checkName = !string.IsNullOrWhiteSpace(name);
+            bool checkTag  = !string.IsNullOrWhiteSpace(tag);
+            if (!checkName && !checkTag) return results;
+
+            try
+            {
+                using var conn = IWCConn.GetSqlConnection();
+                conn.Open();
+                using var cmd = new SqlCommand(@"
+                    SELECT ID,
+                           ISNULL(BlockName, '') AS BlockName,
+                           ISNULL(BlockTag,  '') AS BlockTag,
+                           ISNULL(BlockDesc, '') AS BlockDesc
+                    FROM   dbo.Dwg_Block
+                    WHERE  (@checkName = 1 AND LOWER(BlockName) = LOWER(@name))
+                        OR (@checkTag  = 1 AND LOWER(BlockTag)  = LOWER(@tag));", conn);
+
+                cmd.Parameters.AddWithValue("@checkName", checkName ? 1 : 0);
+                cmd.Parameters.AddWithValue("@name",      (object?)name ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@checkTag",  checkTag  ? 1 : 0);
+                cmd.Parameters.AddWithValue("@tag",       (object?)tag  ?? DBNull.Value);
+
+                using var rdr = cmd.ExecuteReader();
+                while (rdr.Read())
+                    results.Add(new DupeInfo(
+                        rdr.GetInt32(rdr.GetOrdinal("ID")),
+                        rdr["BlockName"] as string,
+                        rdr["BlockTag"]  as string,
+                        rdr["BlockDesc"] as string));
+            }
+            catch { /* non-fatal — allow the save if the check itself fails */ }
+
+            return results;
         }
 
         private void UpdateLinkPreview()
