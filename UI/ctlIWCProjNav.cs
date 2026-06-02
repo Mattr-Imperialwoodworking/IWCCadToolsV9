@@ -40,6 +40,12 @@ namespace IWCCadToolsV9.UI
         private ToolStripMenuItem _miEditMaterial         = new ToolStripMenuItem("Edit Material");
         private ToolStripMenuItem _miAssociateToDash      = new ToolStripMenuItem("Associate to Current Dash");
 
+        // Hardware context menu
+        private ContextMenuStrip  _hdwMenu               = new ContextMenuStrip();
+        private ToolStripMenuItem _miAddHardware          = new ToolStripMenuItem("Add New Hardware");
+        private ToolStripMenuItem _miEditHardware         = new ToolStripMenuItem("Edit Hardware");
+        private ToolStripMenuItem _miAssociateHdwToDash   = new ToolStripMenuItem("Associate to Current Dash");
+
         // Data binding
         private readonly BindingSource _gridBinding = new BindingSource();
 
@@ -89,6 +95,7 @@ namespace IWCCadToolsV9.UI
             SetupIcons();
             ConfigureTreeEvents();
             InitMaterialContextMenu();
+            InitHardwareContextMenu();
             //InitDashFolderContextMenu();
 
             // Subscribe to document switches so the tree refreshes on each drawing
@@ -171,24 +178,39 @@ namespace IWCCadToolsV9.UI
         {
             if (node == null) return;
 
-            bool isMaterialListNode = node.Tag is ChildTag ct &&
-                (ct.ChildLabel?.Contains("Material", StringComparison.OrdinalIgnoreCase) == true);
+            bool isMaterialListNode = node.Tag is ChildTag mct &&
+                mct.ChildLabel?.Contains("Material", StringComparison.OrdinalIgnoreCase) == true;
             bool isMaterialGroup = node.Tag is MatGroupTag;
             bool isMaterialItem  = node.Tag is MatItemTag;
 
-            if (!isMaterialListNode && !isMaterialGroup && !isMaterialItem) return;
+            bool isHardwareListNode = node.Tag is ChildTag hct &&
+                hct.ChildLabel?.Contains("Hardware", StringComparison.OrdinalIgnoreCase) == true;
+            bool isHardwareGroup = node.Tag is HdwGroupTag;
+            bool isHardwareItem  = node.Tag is HdwItemTag;
 
-            bool hasActiveDash = _currentNavSvc?.HasDash == true;
-
-            _miAddMaterial.Visible       = isMaterialListNode || isMaterialGroup;
-            _miEditMaterial.Visible      = isMaterialItem;
-            _miAssociateToDash.Visible   = isMaterialItem;
-            _miAssociateToDash.Enabled   = hasActiveDash;
-            _miAssociateToDash.Text      = hasActiveDash
+            bool hasActiveDash   = _currentNavSvc?.HasDash == true;
+            string dashLabel     = hasActiveDash
                 ? $"Associate to Current Dash ({_currentNavSvc!.Dash!.DashNum})"
                 : "Associate to Current Dash (no active dash)";
 
-            _matMenu.Show(tree, location);
+            if (isMaterialListNode || isMaterialGroup || isMaterialItem)
+            {
+                _miAddMaterial.Visible     = isMaterialListNode || isMaterialGroup;
+                _miEditMaterial.Visible    = isMaterialItem;
+                _miAssociateToDash.Visible = isMaterialItem;
+                _miAssociateToDash.Enabled = hasActiveDash;
+                _miAssociateToDash.Text    = dashLabel;
+                _matMenu.Show(tree, location);
+            }
+            else if (isHardwareListNode || isHardwareGroup || isHardwareItem)
+            {
+                _miAddHardware.Visible          = isHardwareListNode || isHardwareGroup;
+                _miEditHardware.Visible         = isHardwareItem;
+                _miAssociateHdwToDash.Visible   = isHardwareItem;
+                _miAssociateHdwToDash.Enabled   = hasActiveDash;
+                _miAssociateHdwToDash.Text      = dashLabel;
+                _hdwMenu.Show(tree, location);
+            }
         }
 
         private void OnAddMaterial()
@@ -395,6 +417,159 @@ namespace IWCCadToolsV9.UI
                 SelectedImageKey = IconKeyDataTable,
                 Tag              = MatItemTag.Create(listTag.ProjectId, dlg.SavedItemId.Value,
                                        dlg.MatGroupId.Value, dlg.MatNo, dlg.MatDesc)
+            };
+            groupNode.Nodes.Add(newNode);
+            groupNode.Expand();
+            tree.SelectedNode = newNode;
+            newNode.EnsureVisible();
+        }
+
+        #endregion
+
+        #region Hardware Context Menu
+
+        private void InitHardwareContextMenu()
+        {
+            _miAddHardware.Click        += (_, _) => OnAddHardware();
+            _miEditHardware.Click       += (_, _) => OnEditHardware();
+            _miAssociateHdwToDash.Click += (_, _) => OnAssociateHdwToDash();
+            _hdwMenu.Items.Add(_miAddHardware);
+            _hdwMenu.Items.Add(_miEditHardware);
+            _hdwMenu.Items.Add(new ToolStripSeparator());
+            _hdwMenu.Items.Add(_miAssociateHdwToDash);
+        }
+
+        private void OnAddHardware()
+        {
+            var node = tree.SelectedNode;
+            if (node == null) return;
+
+            int     projectId  = 0;
+            int?    groupId    = null;
+            string? groupTag   = null;
+
+            if (node.Tag is ChildTag ct)
+                projectId = ct.ProjectId;
+            else if (node.Tag is HdwGroupTag hgt)
+            {
+                projectId = hgt.ProjectId;
+                groupId   = hgt.GroupId;
+                groupTag  = hgt.GroupTag;
+            }
+            if (projectId == 0) return;
+
+            using var dlg = new FrmProjectHardwareEditor(projectId, groupId, groupTag);
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            InsertHardwareNodeIntoTree(node, dlg);
+        }
+
+        private void OnEditHardware()
+        {
+            var node = tree.SelectedNode;
+            if (node?.Tag is not HdwItemTag hit) return;
+
+            using var dlg = new FrmProjectHardwareEditor(hit.ProjectId, hit.ItemId);
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            // Update node in-place
+            node.Text = $"{dlg.HdwNo} - {dlg.HdwDesc}";
+            node.Tag  = HdwItemTag.Create(hit.ProjectId, hit.ItemId,
+                dlg.HdwGroupId ?? hit.GroupId, dlg.HdwNo, dlg.HdwDesc);
+        }
+
+        private void OnAssociateHdwToDash()
+        {
+            var node = tree.SelectedNode;
+            if (node?.Tag is not HdwItemTag hit) return;
+
+            var svc = _currentNavSvc;
+            if (svc?.HasDash != true || svc.Dash == null)
+            {
+                MessageBox.Show("No active dash is selected for this drawing.\n" +
+                    "Select a dash via Change Project before associating hardware.",
+                    "Associate to Dash", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int    dashId  = svc.Dash.DashId;
+            string dashNum = svc.Dash.DashNum ?? dashId.ToString();
+
+            bool cancelled;
+            long? qty = PromptForQty(hit.HdwNo, hit.HdwDesc, dashNum, out cancelled);
+            if (cancelled) return;
+            if (qty == null && !ConfirmedNullQty()) return;
+
+            try
+            {
+                AssociateHardwareToDash(hit.ItemId, dashId, qty);
+                MessageBox.Show(
+                    $"Hardware '{hit.HdwNo} – {hit.HdwDesc}' associated to Dash {dashNum}" +
+                    (qty.HasValue ? $" (Qty: {qty})" : " (no quantity entered)") + ".",
+                    "Associate to Dash", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to associate hardware:\n{ex.Message}",
+                    "Associate to Dash", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static void AssociateHardwareToDash(int hdwId, int dashId, long? qty)
+        {
+            using var conn = IWCConn.GetSqlConnection();
+            conn.Open();
+            using var cmd = new SqlCommand(@"
+                IF EXISTS (SELECT 1 FROM dbo.Proj_Hdw_Dash WHERE HdwID = @hid AND DashID = @did)
+                    UPDATE dbo.Proj_Hdw_Dash SET HdwQty = @qty WHERE HdwID = @hid AND DashID = @did;
+                ELSE
+                    INSERT INTO dbo.Proj_Hdw_Dash (HdwID, DashID, HdwQty) VALUES (@hid, @did, @qty);",
+                conn);
+            cmd.Parameters.AddWithValue("@hid", hdwId);
+            cmd.Parameters.AddWithValue("@did", dashId);
+            cmd.Parameters.AddWithValue("@qty", qty.HasValue ? (object)qty.Value : DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        private void InsertHardwareNodeIntoTree(TreeNode contextNode, FrmProjectHardwareEditor dlg)
+        {
+            if (dlg.SavedItemId == null || dlg.HdwGroupId == null) return;
+
+            // Walk up to "Project Hardware List" ChildTag node
+            TreeNode? hdwListNode = contextNode;
+            while (hdwListNode != null)
+            {
+                if (hdwListNode.Tag is ChildTag ct &&
+                    ct.ChildLabel?.Contains("Hardware", StringComparison.OrdinalIgnoreCase) == true)
+                    break;
+                hdwListNode = hdwListNode.Parent;
+            }
+            if (hdwListNode?.Tag is not ChildTag listTag) return;
+
+            // If branch not yet loaded, trigger load first
+            bool wasUnloaded = hdwListNode.Nodes.Count == 1 &&
+                               hdwListNode.Nodes[0].Tag is PlaceholderTag;
+            if (wasUnloaded)
+            {
+                try { LoadHardwareForProject(hdwListNode, listTag.ProjectId); }
+                catch { /* best-effort */ }
+            }
+
+            // Find the matching group node
+            TreeNode? groupNode = null;
+            foreach (TreeNode child in hdwListNode.Nodes)
+            {
+                if (child.Tag is HdwGroupTag hgt && hgt.GroupId == dlg.HdwGroupId.Value)
+                { groupNode = child; break; }
+            }
+            if (groupNode == null) return;
+
+            var newNode = new TreeNode($"{dlg.HdwNo} - {dlg.HdwDesc}")
+            {
+                ImageKey         = IconKeyDataTable,
+                SelectedImageKey = IconKeyDataTable,
+                Tag              = HdwItemTag.Create(listTag.ProjectId, dlg.SavedItemId.Value,
+                                       dlg.HdwGroupId.Value, dlg.HdwNo, dlg.HdwDesc)
             };
             groupNode.Nodes.Add(newNode);
             groupNode.Expand();
