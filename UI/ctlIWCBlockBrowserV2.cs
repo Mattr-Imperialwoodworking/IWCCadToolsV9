@@ -5008,6 +5008,36 @@ namespace IWCCadToolsV9.UI
             if (!TryBuildDwgAssetFromSingleBlock(out var assetName, out var dwgBytes, out var preview, out var desc))
                 return;
 
+            // 1b) Duplicate check — before writing anything to the database.
+            // "Project Specific" groups are the only place duplicates are allowed.
+            if (!IsInProjectSpecificGroup(parentNode))
+            {
+                var dupeBlock = FindExistingAssetByName(assetName);
+                if (dupeBlock != null)
+                {
+                    var doc2 = Autodesk.AutoCAD.ApplicationServices.Application
+                                   .DocumentManager.MdiActiveDocument;
+                    doc2?.Editor.WriteMessage(
+                        $"\nIWC Block Browser: A DWG asset named '{assetName}' already " +
+                        $"exists in the library (Block ID {dupeBlock.Id} — " +
+                        $"\"{dupeBlock.BlockName}\"). " +
+                        $"Duplicates are only allowed in the \"Project Specific\" folder. " +
+                        $"Import cancelled.\n");
+
+                    MessageBox.Show(
+                        $"A block asset named \"{assetName}\" already exists in the library:\n\n" +
+                        $"  ID: {dupeBlock.Id}\n" +
+                        $"  Block Name: {dupeBlock.BlockName}\n" +
+                        (string.IsNullOrWhiteSpace(dupeBlock.BlockTag) ? "" :
+                            $"  Display Name: {dupeBlock.BlockTag}\n") +
+                        $"\nDuplicate assets are only allowed in the \"Project Specific\" folder.",
+                        "Duplicate Block Asset",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
             int newBlockId;
             using (var conn = new IWCConn())
             {
@@ -5516,6 +5546,41 @@ namespace IWCCadToolsV9.UI
                 current = current.Parent;
             }
             return false;
+        }
+
+        private sealed record ExistingBlockInfo(int Id, string? BlockName, string? BlockTag);
+
+        /// <summary>
+        /// Returns the first existing block that already has a DWG asset whose
+        /// filename (without extension) matches <paramref name="blockName"/>
+        /// case-insensitively, or null if no match is found.
+        /// </summary>
+        private static ExistingBlockInfo? FindExistingAssetByName(string? blockName)
+        {
+            if (string.IsNullOrWhiteSpace(blockName)) return null;
+            try
+            {
+                using var conn = new IWCConn();
+                conn.DBConnect();
+                using var cmd = new Microsoft.Data.SqlClient.SqlCommand(@"
+                    SELECT TOP 1
+                           b.ID,
+                           ISNULL(b.BlockName, '') AS BlockName,
+                           ISNULL(b.BlockTag,  '') AS BlockTag
+                    FROM   dbo.Dwg_Block b
+                    INNER JOIN dbo.Dwg_BlockAssets a ON a.BlockID = b.ID
+                    WHERE  a.FileType = '.dwg'
+                      AND  LOWER(REPLACE(a.FileName, '.dwg', '')) = LOWER(@name);",
+                    conn.OpenConn);
+                cmd.Parameters.AddWithValue("@name", blockName);
+                using var rdr = cmd.ExecuteReader();
+                if (!rdr.Read()) return null;
+                return new ExistingBlockInfo(
+                    rdr.GetInt32(rdr.GetOrdinal("ID")),
+                    rdr["BlockName"] as string,
+                    rdr["BlockTag"]  as string);
+            }
+            catch { return null; }
         }
 
         // -----------------------------------------------------------------------
