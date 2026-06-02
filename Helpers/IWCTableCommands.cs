@@ -91,7 +91,7 @@ namespace IWCCadToolsV9.Helpers
             double colDescWidth = 3.125 * scale;   // 3-1/8" — Dash_Desc column
             double titleHeight  = 0.25  * scale;   // 1/4"  — title row
             double dataHeight   = 0.375 * scale;   // 3/8"  — data rows
-            double textHeight   = 0.125 * scale;   // 1/8"  — text size
+            double textHeight   = (5.0 / 64.0) * scale;   // 5/64" — all text
 
             // --- Create and insert the table ---
             using var tr = db.TransactionManager.StartTransaction();
@@ -113,10 +113,11 @@ namespace IWCCadToolsV9.Helpers
             table.SetRowHeight(0, titleHeight);
             table.MergeCells(CellRange.Create(table, 0, 0, 0, 1));
             SetCell(table, 0, 0,
-                text: "DASH COMPONENT LIST",
+                text: "DASH COMPONENT LIST",   // already uppercase
                 height: textHeight,
                 align: CellAlignment.MiddleCenter,
-                bgColor: Autodesk.AutoCAD.Colors.Color.FromRgb(211, 211, 211));
+                bgColor: Autodesk.AutoCAD.Colors.Color.FromRgb(211, 211, 211),
+                bold: false);
 
             // --- Data rows ---
             for (int i = 0; i < components.Count; i++)
@@ -125,12 +126,12 @@ namespace IWCCadToolsV9.Helpers
                 table.SetRowHeight(row, dataHeight);
 
                 SetCell(table, row, 0,
-                    text: components[i].Num,
+                    text: components[i].Num.ToUpperInvariant(),
                     height: textHeight,
                     align: CellAlignment.MiddleCenter);
 
                 SetCell(table, row, 1,
-                    text: components[i].Desc,
+                    text: components[i].Desc.ToUpperInvariant(),
                     height: textHeight,
                     align: CellAlignment.MiddleLeft);
             }
@@ -189,18 +190,23 @@ namespace IWCCadToolsV9.Helpers
 
         private static void SetCell(Table table, int row, int col,
             string text, double height, CellAlignment align,
-            Autodesk.AutoCAD.Colors.Color? bgColor = null)
+            Autodesk.AutoCAD.Colors.Color? bgColor = null,
+            bool bold = false)
         {
             var cell = table.Cells[row, col];
             cell.TextString = text;
             cell.TextHeight = height;
             cell.Alignment  = align;
 
+            // Suppress bold via MTEXT override when explicitly requested.
+            // AutoCAD title rows often inherit bold from the table style;
+            // prefixing with \b0; forces non-bold regardless of style.
+            if (!bold && cell.TextString.Length > 0)
+                cell.TextString = @"{\b0;" + cell.TextString + "}";
+
             if (bgColor != null)
             {
                 cell.BackgroundColor = bgColor;
-                // IsBackgroundColorNone = false enables the background fill;
-                // if unavailable in this API version the colour is still stored.
                 try { cell.IsBackgroundColorNone = false; } catch { }
             }
         }
