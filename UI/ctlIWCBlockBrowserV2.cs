@@ -82,8 +82,12 @@ namespace IWCCadToolsV9.UI
             listAssets.LargeImageList = _assetThumbs;
             listAssets.SmallImageList = _assetThumbs;
 
-            btnRefresh.Click += (s, e) => LoadGroupsAndBlocks();
-            btnSearch.Click  += (s, e) => OpenSearchDialog();
+            btnRefresh.Click          += (s, e) => LoadGroupsAndBlocks();
+            btnSearchInline.Click     += (s, e) => OpenSearchDialog();
+            txtSearchInline.KeyDown   += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; OpenSearchDialog(); }
+            };
             treeGroups.AfterSelect += treeGroups_AfterSelect;
             treeGroups.NodeMouseClick += TreeGroups_NodeMouseClick;
             treeGroups.NodeMouseDoubleClick += TreeGroups_NodeMouseDoubleClick; // NEW
@@ -679,7 +683,7 @@ namespace IWCCadToolsV9.UI
 
         private void OpenSearchDialog()
         {
-            using var dlg = new FrmBlockSearch();
+            using var dlg = new FrmBlockSearch(txtSearchInline.Text.Trim());
             if (dlg.ShowDialog(this) != System.Windows.Forms.DialogResult.OK) return;
             OpenOrInsertFromSearch(dlg.SelectedAssetId, dlg.SelectedBlockId,
                                    dlg.SelectedBlockName, dlg.SelectedIsComponent);

@@ -34,11 +34,25 @@ namespace IWCCadToolsV9.UI
         // Construction
         // -----------------------------------------------------------------------
 
-        public FrmBlockSearch()
+        private readonly string _initialTerm;
+
+        /// <param name="initialTerm">Pre-fills the search box and auto-runs the search on load.</param>
+        public FrmBlockSearch(string initialTerm = "")
         {
+            _initialTerm = initialTerm;
             InitializeComponent();
             BuildResultSchema();
             WireEvents();
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            if (!string.IsNullOrWhiteSpace(_initialTerm))
+            {
+                txtSearch.Text = _initialTerm;
+                _ = RunSearchAsync();   // auto-run with the supplied term
+            }
         }
 
         // -----------------------------------------------------------------------

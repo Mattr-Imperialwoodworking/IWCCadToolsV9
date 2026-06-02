@@ -13,7 +13,6 @@ namespace IWCCadToolsV9.UI
         private TableLayoutPanel rightLayout;   // top: toolbar, middle: assets, right: preview panel
         private FlowLayoutPanel toolbar;
         private Button btnRefresh;
-        private Button btnSearch;
         private Label lblBlockCaption;
         private Label lblSelectedBlock;
         private Button btnOpenInsert;
@@ -46,6 +45,10 @@ namespace IWCCadToolsV9.UI
             base.Dispose(disposing);
         }
 
+        private TableLayoutPanel pnlSearchBar;
+        private TextBox          txtSearchInline;
+        private Button           btnSearchInline;
+
         private void InitializeComponent()
         {
             splitMain = new SplitContainer();
@@ -53,7 +56,6 @@ namespace IWCCadToolsV9.UI
             rightLayout = new TableLayoutPanel();
             toolbar = new FlowLayoutPanel();
             btnRefresh = new Button();
-            btnSearch  = new Button();
             lblBlockCaption = new Label();
             lblSelectedBlock = new Label();
             btnOpenInsert = new Button();
@@ -64,6 +66,10 @@ namespace IWCCadToolsV9.UI
             lblTypeCaption = new Label();
             lblAssetType = new Label();
             picturePreview = new PictureBox();
+            pnlSearchBar    = new TableLayoutPanel();
+            txtSearchInline = new TextBox();
+            btnSearchInline = new Button();
+
             ((System.ComponentModel.ISupportInitialize)splitMain).BeginInit();
             splitMain.Panel1.SuspendLayout();
             splitMain.Panel2.SuspendLayout();
@@ -73,16 +79,46 @@ namespace IWCCadToolsV9.UI
             previewPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)picturePreview).BeginInit();
             SuspendLayout();
-            // 
+
+            //
+            // pnlSearchBar — sits above the tree in Panel1
+            //
+            pnlSearchBar.Dock        = DockStyle.Top;
+            pnlSearchBar.Height      = 36;
+            pnlSearchBar.ColumnCount = 2;
+            pnlSearchBar.RowCount    = 1;
+            pnlSearchBar.Padding     = new Padding(4, 4, 4, 4);
+            pnlSearchBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            pnlSearchBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82F));
+            pnlSearchBar.Controls.Add(txtSearchInline,  0, 0);
+            pnlSearchBar.Controls.Add(btnSearchInline,  1, 0);
+            pnlSearchBar.Name = "pnlSearchBar";
+            //
+            // txtSearchInline
+            //
+            txtSearchInline.Dock          = DockStyle.Fill;
+            txtSearchInline.PlaceholderText = "Search blocks & assets…";
+            txtSearchInline.Name          = "txtSearchInline";
+            txtSearchInline.TabIndex      = 0;
+            //
+            // btnSearchInline
+            //
+            btnSearchInline.Dock     = DockStyle.Fill;
+            btnSearchInline.Name     = "btnSearchInline";
+            btnSearchInline.Text     = "🔍 Search";
+            btnSearchInline.TabIndex = 1;
+
+            //
             // splitMain
-            // 
+            //
             splitMain.Dock = DockStyle.Fill;
             splitMain.Location = new Point(0, 0);
             splitMain.Name = "splitMain";
-            // 
+            //
             // splitMain.Panel1
-            // 
+            //
             splitMain.Panel1.Controls.Add(treeGroups);
+            splitMain.Panel1.Controls.Add(pnlSearchBar);  // search bar above tree
             // 
             // splitMain.Panel2
             // 
@@ -121,7 +157,6 @@ namespace IWCCadToolsV9.UI
             // 
             rightLayout.SetColumnSpan(toolbar, 2);
             toolbar.Controls.Add(btnRefresh);
-            toolbar.Controls.Add(btnSearch);
             toolbar.Controls.Add(lblBlockCaption);
             toolbar.Controls.Add(lblSelectedBlock);
             toolbar.Controls.Add(btnOpenInsert);
@@ -141,14 +176,6 @@ namespace IWCCadToolsV9.UI
             btnRefresh.Size = new Size(75, 25);
             btnRefresh.TabIndex = 0;
             btnRefresh.Text = "Refresh";
-            //
-            // btnSearch
-            //
-            btnSearch.AutoSize = true;
-            btnSearch.Name     = "btnSearch";
-            btnSearch.Size     = new Size(75, 25);
-            btnSearch.TabIndex = 1;
-            btnSearch.Text     = "🔍 Search";
             //
             // lblBlockCaption
             // 
