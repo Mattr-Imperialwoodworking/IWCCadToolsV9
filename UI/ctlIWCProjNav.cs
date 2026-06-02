@@ -129,7 +129,22 @@ namespace IWCCadToolsV9.UI
             if (svc?.HasProject == true && svc.Project != null)
                 ReloadForProject(svc.Project.Id, svc.Project.IdNum, svc.Project.Name);
             else
-                ReloadProjects();
+                ShowNoActiveProject();
+        }
+
+        private void ShowNoActiveProject()
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(ShowNoActiveProject)); return; }
+            tree.BeginUpdate();
+            tree.Nodes.Clear();
+            var placeholder = new TreeNode("No Active Project")
+            {
+                ImageKey         = IconKeyFolder,
+                SelectedImageKey = IconKeyFolder,
+                ForeColor        = System.Drawing.SystemColors.GrayText
+            };
+            tree.Nodes.Add(placeholder);
+            tree.EndUpdate();
         }
 
         #region Material Context Menu
@@ -186,8 +201,8 @@ namespace IWCCadToolsV9.UI
             using var dlg = new FrmProjectMaterialEditor(projectId, groupId);
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
-            // Reload the materials branch
-            RefreshMaterialListNode(node, projectId);
+            // Add just the new node into the correct group — no full reload needed
+            InsertMaterialNodeIntoTree(node, dlg);
         }
 
         private void OnEditMaterial()
@@ -195,30 +210,26 @@ namespace IWCCadToolsV9.UI
             var node = tree.SelectedNode;
             if (node?.Tag is not MatItemTag mit) return;
 
-            using var dlg = new FrmProjectMaterialEditor(
-                projectId: mit.ProjectId,
-                itemId:    mit.ItemId,
-                matNo:     mit.MatNo,
-                matDesc:   mit.MatDesc,
-                groupId:   mit.GroupId);
-
+            // Edit mode: pass projectId + itemId; dialog loads full record from DB
+            using var dlg = new FrmProjectMaterialEditor(mit.ProjectId, mit.ItemId);
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
-            // Update the node text in-place and reload the branch
+            // Update the node text and tag in-place — no tree rebuild needed
             node.Text = $"{dlg.MatNo} - {dlg.MatDesc}";
             node.Tag  = MatItemTag.Create(mit.ProjectId, mit.ItemId,
                 dlg.MatGroupId ?? mit.GroupId, dlg.MatNo, dlg.MatDesc);
-
-            RefreshMaterialListNode(node, mit.ProjectId);
         }
 
         /// <summary>
-        /// Walks up to the "Project Material List" ChildTag node and forces a full reload.
+        /// After a successful Add, inserts the new item node directly into the
+        /// correct group folder without rebuilding the entire materials branch.
         /// </summary>
-        private void RefreshMaterialListNode(TreeNode startNode, int projectId)
+        private void InsertMaterialNodeIntoTree(TreeNode contextNode, FrmProjectMaterialEditor dlg)
         {
-            // Find the Project Material List ancestor node
-            TreeNode? matListNode = startNode;
+            if (dlg.SavedItemId == null || dlg.MatGroupId == null) return;
+
+            // Walk up to the "Project Material List" ChildTag node
+            TreeNode? matListNode = contextNode;
             while (matListNode != null)
             {
                 if (matListNode.Tag is ChildTag ct &&
@@ -226,26 +237,42 @@ namespace IWCCadToolsV9.UI
                     break;
                 matListNode = matListNode.Parent;
             }
+            if (matListNode?.Tag is not ChildTag listTag) return;
 
-            if (matListNode == null) return;
-
-            // Collapse, clear, reset placeholder, then re-expand to re-trigger lazy load
-            matListNode.Collapse();
-            matListNode.Nodes.Clear();
-            matListNode.Nodes.Add(new TreeNode("...Load Materials")
+            // If the branch hasn't been expanded yet the group nodes don't exist —
+            // force a load so the new item lands in the right place
+            bool wasUnloaded = matListNode.Nodes.Count == 1 &&
+                               matListNode.Nodes[0].Tag is PlaceholderTag;
+            if (wasUnloaded)
             {
-                ImageKey         = IconKeyFolder,
-                SelectedImageKey = IconKeyFolder,
-                Tag              = PlaceholderTag.For("MatListLoader")
-            });
-
-            // Immediately reload so the user sees fresh data without an extra click
-            try { LoadMaterialsForProject(matListNode, projectId); }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to reload materials:\n{ex.Message}",
-                    "Project Navigator", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                try { LoadMaterialsForProject(matListNode, listTag.ProjectId); }
+                catch { /* best-effort */ }
             }
+
+            // Find the matching group node
+            TreeNode? groupNode = null;
+            foreach (TreeNode child in matListNode.Nodes)
+            {
+                if (child.Tag is MatGroupTag mgt && mgt.GroupId == dlg.MatGroupId.Value)
+                {
+                    groupNode = child;
+                    break;
+                }
+            }
+            if (groupNode == null) return;
+
+            // Create and insert the new item node
+            var newNode = new TreeNode($"{dlg.MatNo} - {dlg.MatDesc}")
+            {
+                ImageKey         = IconKeyDataTable,
+                SelectedImageKey = IconKeyDataTable,
+                Tag              = MatItemTag.Create(listTag.ProjectId, dlg.SavedItemId.Value,
+                                       dlg.MatGroupId.Value, dlg.MatNo, dlg.MatDesc)
+            };
+            groupNode.Nodes.Add(newNode);
+            groupNode.Expand();
+            tree.SelectedNode = newNode;
+            newNode.EnsureVisible();
         }
 
         #endregion
