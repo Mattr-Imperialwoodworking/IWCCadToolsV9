@@ -35,9 +35,10 @@ namespace IWCCadToolsV9.UI
         private ToolStripMenuItem? _miDashFolderRefresh;
 
         // Material context menu
-        private ContextMenuStrip  _matMenu          = new ContextMenuStrip();
-        private ToolStripMenuItem _miAddMaterial     = new ToolStripMenuItem("Add New Material");
-        private ToolStripMenuItem _miEditMaterial    = new ToolStripMenuItem("Edit Material");
+        private ContextMenuStrip  _matMenu               = new ContextMenuStrip();
+        private ToolStripMenuItem _miAddMaterial          = new ToolStripMenuItem("Add New Material");
+        private ToolStripMenuItem _miEditMaterial         = new ToolStripMenuItem("Edit Material");
+        private ToolStripMenuItem _miAssociateToDash      = new ToolStripMenuItem("Associate to Current Dash");
 
         // Data binding
         private readonly BindingSource _gridBinding = new BindingSource();
@@ -151,10 +152,13 @@ namespace IWCCadToolsV9.UI
 
         private void InitMaterialContextMenu()
         {
-            _miAddMaterial.Click  += (_, _) => OnAddMaterial();
-            _miEditMaterial.Click += (_, _) => OnEditMaterial();
+            _miAddMaterial.Click     += (_, _) => OnAddMaterial();
+            _miEditMaterial.Click    += (_, _) => OnEditMaterial();
+            _miAssociateToDash.Click += (_, _) => OnAssociateToDash();
             _matMenu.Items.Add(_miAddMaterial);
             _matMenu.Items.Add(_miEditMaterial);
+            _matMenu.Items.Add(new ToolStripSeparator());
+            _matMenu.Items.Add(_miAssociateToDash);
         }
 
         /// <summary>
@@ -174,8 +178,16 @@ namespace IWCCadToolsV9.UI
 
             if (!isMaterialListNode && !isMaterialGroup && !isMaterialItem) return;
 
-            _miAddMaterial.Visible  = isMaterialListNode || isMaterialGroup;
-            _miEditMaterial.Visible = isMaterialItem;
+            bool hasActiveDash = _currentNavSvc?.HasDash == true;
+
+            _miAddMaterial.Visible       = isMaterialListNode || isMaterialGroup;
+            _miEditMaterial.Visible      = isMaterialItem;
+            _miAssociateToDash.Visible   = isMaterialItem;
+            _miAssociateToDash.Enabled   = hasActiveDash;
+            _miAssociateToDash.Text      = hasActiveDash
+                ? $"Associate to Current Dash ({_currentNavSvc!.Dash!.DashNum})"
+                : "Associate to Current Dash (no active dash)";
+
             _matMenu.Show(tree, location);
         }
 
@@ -218,6 +230,121 @@ namespace IWCCadToolsV9.UI
             node.Text = $"{dlg.MatNo} - {dlg.MatDesc}";
             node.Tag  = MatItemTag.Create(mit.ProjectId, mit.ItemId,
                 dlg.MatGroupId ?? mit.GroupId, dlg.MatNo, dlg.MatDesc);
+        }
+
+        private void OnAssociateToDash()
+        {
+            var node = tree.SelectedNode;
+            if (node?.Tag is not MatItemTag mit) return;
+
+            var svc = _currentNavSvc;
+            if (svc?.HasDash != true || svc.Dash == null)
+            {
+                MessageBox.Show("No active dash is selected for this drawing.\n" +
+                    "Select a dash via Change Project before associating materials.",
+                    "Associate to Dash", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int dashId   = svc.Dash.DashId;
+            string dashNum = svc.Dash.DashNum ?? dashId.ToString();
+
+            // Prompt for optional quantity
+            bool cancelled;
+            long? qty = PromptForQty(mit.MatNo, mit.MatDesc, dashNum, out cancelled);
+            if (cancelled) return;
+            if (qty == null && !ConfirmedNullQty()) return;
+
+            try
+            {
+                AssociateMaterialToDash(mit.ItemId, dashId, qty);
+                MessageBox.Show(
+                    $"Material '{mit.MatNo} – {mit.MatDesc}' associated to Dash {dashNum}" +
+                    (qty.HasValue ? $" (Qty: {qty})" : " (no quantity entered)") + ".",
+                    "Associate to Dash", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to associate material:\n{ex.Message}",
+                    "Associate to Dash", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// Shows a simple input box for quantity. Returns the entered value,
+        /// or null if the user left the box empty and clicked OK.
+        /// Returns a sentinel of -1 if the user cancelled.
+        /// </summary>
+        private static long? PromptForQty(string? matNo, string? matDesc, string dashNum, out bool cancelled)
+        {
+            cancelled = false;
+            using var frm = new Form
+            {
+                Text            = "Enter Quantity",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                ClientSize      = new System.Drawing.Size(360, 140),
+                MinimizeBox     = false, MaximizeBox = false,
+                StartPosition   = FormStartPosition.CenterParent
+            };
+
+            var lbl = new Label
+            {
+                Text = $"Associating: {matNo} – {matDesc}\nDash: {dashNum}\n\nQuantity (leave blank to skip):",
+                AutoSize = false, Dock = DockStyle.None,
+                Location = new System.Drawing.Point(12, 10),
+                Size     = new System.Drawing.Size(336, 60)
+            };
+            var txt = new TextBox
+            {
+                Location = new System.Drawing.Point(12, 74),
+                Width    = 120
+            };
+            var btnOk     = new Button { Text = "OK",     Width = 80, DialogResult = DialogResult.OK };
+            var btnCancel = new Button { Text = "Cancel", Width = 80, DialogResult = DialogResult.Cancel };
+            btnOk.Location     = new System.Drawing.Point(108, 100);
+            btnCancel.Location = new System.Drawing.Point(196, 100);
+
+            frm.Controls.AddRange(new Control[] { lbl, txt, btnOk, btnCancel });
+            frm.AcceptButton = btnOk;
+            frm.CancelButton = btnCancel;
+
+            if (frm.ShowDialog() != DialogResult.OK)
+            {
+                cancelled = true;
+                return null;
+            }
+
+            return long.TryParse(txt.Text.Trim(), out long v) ? v : null;
+        }
+
+        // Returns true if user confirmed they want to proceed without a quantity
+        private bool ConfirmedNullQty()
+        {
+            var answer = MessageBox.Show(
+                "No quantity was entered. Associate this material without a quantity?",
+                "Associate to Dash", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            return answer == DialogResult.Yes;
+        }
+
+        private static void AssociateMaterialToDash(int matId, int dashId, long? qty)
+        {
+            using var conn = IWCConn.GetSqlConnection();
+            conn.Open();
+
+            // Avoid duplicate associations — upsert pattern
+            using var cmd = new SqlCommand(@"
+                IF EXISTS (SELECT 1 FROM dbo.Proj_Mat_Dash WHERE MatID = @mid AND DashID = @did)
+                    UPDATE dbo.Proj_Mat_Dash
+                    SET    MatQty = @qty
+                    WHERE  MatID  = @mid AND DashID = @did;
+                ELSE
+                    INSERT INTO dbo.Proj_Mat_Dash (MatID, DashID, MatQty)
+                    VALUES (@mid, @did, @qty);", conn);
+
+            cmd.Parameters.AddWithValue("@mid", matId);
+            cmd.Parameters.AddWithValue("@did", dashId);
+            cmd.Parameters.AddWithValue("@qty", qty.HasValue ? (object)qty.Value : DBNull.Value);
+            cmd.ExecuteNonQuery();
         }
 
         /// <summary>
