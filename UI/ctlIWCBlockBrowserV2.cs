@@ -1124,21 +1124,27 @@ namespace IWCCadToolsV9.UI
                     {
                         var defId = !br.DynamicBlockTableRecord.IsNull ? br.DynamicBlockTableRecord : br.BlockTableRecord;
 
+                        // Get the definition name so we can render from the BTR directly —
+                        // same approach as CreateComponentUnderGroup which produces correct icons.
+                        string defName = Sanitize(GetBaseBlockName(br, tr));
+
                         // Export DWG bytes (definition "as-is")
-                        string tempPath = ExportBlockDefinitionAsIs(db, defId, "IWC_REPLACE");
+                        string tempPath = ExportBlockDefinitionAsIs(db, defId, defName);
                         dwgBytes = System.IO.File.ReadAllBytes(tempPath);
                         try { System.IO.File.Delete(tempPath); } catch { /* ignore */ }
 
-                        // Preview from the selected reference (crisp)
+                        // Render preview from the block definition (not the reference in context).
+                        // RenderBlockIconPng uses the BTR geometry directly, so layer colours,
+                        // viewport settings and context visibility cannot cause a black icon.
                         try
                         {
-                            previewPng = BlockIconRenderer.RenderBlockIconFromReference(
+                            previewPng = BlockIconRenderer.RenderBlockIconPng(
                                 db,
-                                br.ObjectId,
+                                defName,
                                 iconSizePx: 64,
-                                supersampleFactor: 3,
+                                supersampleFactor: 2,
                                 background: System.Drawing.Color.Black,
-                                finalHairlinePx: 0.55f);
+                                finalHairlinePx: 0.35f);
                         }
                         catch { previewPng = null; }
 
