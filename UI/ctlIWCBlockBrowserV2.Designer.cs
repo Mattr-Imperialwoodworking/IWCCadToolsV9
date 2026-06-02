@@ -13,6 +13,7 @@ namespace IWCCadToolsV9.UI
         private TableLayoutPanel rightLayout;   // top: toolbar, middle: assets, right: preview panel
         private FlowLayoutPanel toolbar;
         private Button btnRefresh;
+        private Button btnSearch;
         private Label lblBlockCaption;
         private Label lblSelectedBlock;
         private Button btnOpenInsert;
@@ -52,6 +53,7 @@ namespace IWCCadToolsV9.UI
             rightLayout = new TableLayoutPanel();
             toolbar = new FlowLayoutPanel();
             btnRefresh = new Button();
+            btnSearch  = new Button();
             lblBlockCaption = new Label();
             lblSelectedBlock = new Label();
             btnOpenInsert = new Button();
@@ -119,6 +121,7 @@ namespace IWCCadToolsV9.UI
             // 
             rightLayout.SetColumnSpan(toolbar, 2);
             toolbar.Controls.Add(btnRefresh);
+            toolbar.Controls.Add(btnSearch);
             toolbar.Controls.Add(lblBlockCaption);
             toolbar.Controls.Add(lblSelectedBlock);
             toolbar.Controls.Add(btnOpenInsert);
@@ -138,7 +141,15 @@ namespace IWCCadToolsV9.UI
             btnRefresh.Size = new Size(75, 25);
             btnRefresh.TabIndex = 0;
             btnRefresh.Text = "Refresh";
-            // 
+            //
+            // btnSearch
+            //
+            btnSearch.AutoSize = true;
+            btnSearch.Name     = "btnSearch";
+            btnSearch.Size     = new Size(75, 25);
+            btnSearch.TabIndex = 1;
+            btnSearch.Text     = "🔍 Search";
+            //
             // lblBlockCaption
             // 
             lblBlockCaption.AutoSize = true;

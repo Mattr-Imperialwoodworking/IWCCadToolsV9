@@ -83,6 +83,7 @@ namespace IWCCadToolsV9.UI
             listAssets.SmallImageList = _assetThumbs;
 
             btnRefresh.Click += (s, e) => LoadGroupsAndBlocks();
+            btnSearch.Click  += (s, e) => OpenSearchDialog();
             treeGroups.AfterSelect += treeGroups_AfterSelect;
             treeGroups.NodeMouseClick += TreeGroups_NodeMouseClick;
             treeGroups.NodeMouseDoubleClick += TreeGroups_NodeMouseDoubleClick; // NEW
@@ -670,6 +671,106 @@ namespace IWCCadToolsV9.UI
             {
                 MessageBox.Show($"Action failed: {ex.Message}", "Block Browser V2", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        // -----------------------------------------------------------------------
+        // Block Search dialog
+        // -----------------------------------------------------------------------
+
+        private void OpenSearchDialog()
+        {
+            using var dlg = new FrmBlockSearch();
+            if (dlg.ShowDialog(this) != System.Windows.Forms.DialogResult.OK) return;
+            OpenOrInsertFromSearch(dlg.SelectedAssetId, dlg.SelectedBlockId,
+                                   dlg.SelectedBlockName, dlg.SelectedIsComponent);
+        }
+
+        /// <summary>
+        /// Loads the full asset record (including file bytes) and inserts or opens it.
+        /// Called from FrmBlockSearch when the user double-clicks a result row.
+        /// </summary>
+        private void OpenOrInsertFromSearch(int assetId, int blockId, string blockName, bool isComponent)
+        {
+            AssetInfo? ai = null;
+            try
+            {
+                ai = LoadFullAsset(assetId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load asset data:\n{ex.Message}",
+                    "Block Browser", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (ai == null)
+            {
+                MessageBox.Show("Asset not found.", "Block Browser",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(ai.LinkUrl))
+                {
+                    OpenUrl(ai.LinkUrl);
+                }
+                else if (string.Equals(ai.FileExt, ".dwg", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Build desired name using the same rules as InsertDwgAsset:
+                    // component (1 DWG asset) → bare asset name; assembly → "BlockName.AssetName"
+                    string baseName     = System.IO.Path.GetFileNameWithoutExtension(ai.FileName ?? $"Asset_{ai.Id}");
+                    string desiredName  = isComponent
+                        ? SanitizeBlockName(baseName)
+                        : SanitizeBlockName($"{blockName}.{baseName}");
+
+                    // Re-use InsertDwgAsset with a synthetic context node so we get the
+                    // full import/prompt/insert pipeline. Pass null — the method will
+                    // call FindBlockNode(ai.BlockId) to locate the tree node automatically.
+                    InsertDwgAsset(ai, contextNode: null);
+                }
+                else
+                {
+                    OpenNonDwgAsset(ai);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Action failed:\n{ex.Message}",
+                    "Block Browser", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// Loads a single asset record including its FileData bytes from the database.
+        /// </summary>
+        private static AssetInfo? LoadFullAsset(int assetId)
+        {
+            using var conn = IWCConn.GetSqlConnection();
+            conn.Open();
+            using var cmd = new Microsoft.Data.SqlClient.SqlCommand(@"
+                SELECT ID, BlockID, FileName, FileType, FileDescription,
+                       FileDateAdded, FileImage, FileData, FileIsView, AssetLinkUrl
+                FROM dbo.Dwg_BlockAssets
+                WHERE ID = @id", conn);
+            cmd.Parameters.AddWithValue("@id", assetId);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read()) return null;
+
+            return new AssetInfo
+            {
+                Id            = rdr.GetInt32(rdr.GetOrdinal("ID")),
+                BlockId       = rdr.GetInt32(rdr.GetOrdinal("BlockID")),
+                FileName      = rdr["FileName"]      as string,
+                FileExt       = rdr["FileType"]       as string,
+                Description   = rdr["FileDescription"] as string,
+                DateAdded     = rdr["FileDateAdded"]  is DateTime dt ? dt : null,
+                FileImageBytes= rdr["FileImage"]      as byte[],
+                FileDataBytes = rdr["FileData"]       as byte[],
+                IsView        = rdr["FileIsView"]  is bool b && b,
+                LinkUrl       = rdr["AssetLinkUrl"]   as string,
+            };
         }
 
         // -----------------------------
