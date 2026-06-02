@@ -102,34 +102,48 @@ namespace IWCCadToolsV9.Helpers
             // Sort: top-right first → right-to-left → top-to-bottom
             var sorted = SortViewports(viewports.Select(t => t.Vp).ToList());
 
-            // ── 4. Main insert transaction ───────────────────────────────────
+            // Count existing labels now (before the transaction) for prompt numbering
+            int existingCountForPrompt = 0;
+            using (var cntTr = db.TransactionManager.StartTransaction())
+            {
+                var cntBtr = (BlockTableRecord)cntTr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
+                var cntBt  = (BlockTable)cntTr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                if (cntBt.Has(BlockName))
+                    existingCountForPrompt = CountExistingLabels(cntTr, cntBtr, cntBt[BlockName]);
+                cntTr.Commit();
+            }
+
+            // ── 4. Prompt for titles up-front (outside the transaction) ─────
+            var titleChoices = new List<string>();
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                string? title = PromptForTitle(ed, existingCountForPrompt + i + 1);
+                if (title == null) { ed.WriteMessage("\nIWC_VIEW cancelled.\n"); return; }
+                titleChoices.Add(title);
+            }
+
+            // ── 5. Main insert transaction ───────────────────────────────────
             using var tr = db.TransactionManager.StartTransaction();
-            var bt      = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            var bt        = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
             var layoutBtr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
 
             ObjectId blockDefId = bt[BlockName];
-            var btrDef = (BlockTableRecord)tr.GetObject(blockDefId, OpenMode.ForRead);
 
-            // Count existing view-label instances already on this layout
+            // Count existing view-label instances on this layout
             int existingCount = CountExistingLabels(tr, layoutBtr, blockDefId);
+            int viewNumber    = existingCount;
 
-            int viewNumber = existingCount;
-
-            foreach (var vp in sorted)
+            for (int i = 0; i < sorted.Count; i++)
             {
                 viewNumber++;
+                var vp        = sorted[i];
+                string title  = titleChoices[i];
 
-                // ── Prompt for title type per viewport ──────────────────────
-                string? title = PromptForTitle(ed, viewNumber);
-                if (title == null) { tr.Abort(); return; }   // user cancelled
-
-                // ── Geometry ────────────────────────────────────────────────
+                // ── Insertion point: 1/2" below bottom-left of viewport ─────
                 double vpLeft   = vp.CenterPoint.X - vp.Width  / 2.0;
                 double vpBottom = vp.CenterPoint.Y - vp.Height / 2.0;
-                // 1/2" below bottom-left in paper space (1 unit = 1 inch in layouts)
                 var insPt = new Point3d(vpLeft, vpBottom - 0.5, 0);
 
-                // ── Annotation scale label ───────────────────────────────────
                 string scaleName = GetScaleName(vp);
 
                 // ── Insert block reference ───────────────────────────────────
@@ -138,47 +152,84 @@ namespace IWCCadToolsV9.Helpers
                 layoutBtr.AppendEntity(bref);
                 tr.AddNewlyCreatedDBObject(bref, true);
 
-                // ── Set dynamic property "Distance1" = viewport width ────────
-                SetDynamicProperty(bref, "Distance1", vp.Width);
+                // ── Annotative scale (matches block browser behaviour) ───────
+                // If the block is annotative, register the current annotation
+                // scale on the reference so its geometry is visible.
+                bool annotative = IsAnnotativeBtr(blockDefId, tr);
+                if (!annotative)
+                    try { annotative = bref.Annotative == AnnotativeStates.True; } catch { }
 
-                // ── Add and set attributes ───────────────────────────────────
-                foreach (ObjectId attDefId in btrDef)
+                if (annotative)
                 {
-                    var attDef = tr.GetObject(attDefId, OpenMode.ForRead) as AttributeDefinition;
-                    if (attDef == null) continue;
+                    try { if (bref.Annotative != AnnotativeStates.True) bref.Annotative = AnnotativeStates.True; }
+                    catch { }
+                    EnsureAnnotativeScaleOn(bref, db, "1:1");
+                }
 
-                    var attRef = new AttributeReference();
-                    attRef.SetAttributeFromBlock(attDef, bref.BlockTransform);
-                    bref.AttributeCollection.AppendAttribute(attRef);
-                    tr.AddNewlyCreatedDBObject(attRef, true);
+                // ── Initialise attributes (correct database-resident ordering)
+                // InitializeAttributesOnInsert creates each AttributeReference,
+                // appends it to the collection, registers it with the transaction,
+                // THEN calls SetAttributeFromBlock — the only order that preserves
+                // field expressions (e.g. the LT sheet-number field).
+                AttributeFieldHelper.InitializeAttributesOnInsert(tr, bref);
 
-                    switch (attDef.Tag.ToUpperInvariant())
+                // ── Override specific attribute values ───────────────────────
+                foreach (ObjectId arId in bref.AttributeCollection)
+                {
+                    var ar = tr.GetObject(arId, OpenMode.ForWrite) as AttributeReference;
+                    if (ar == null) continue;
+                    switch (ar.Tag.ToUpperInvariant())
                     {
-                        case "UT":
-                            attRef.TextString = viewNumber.ToString();
-                            break;
-
-                        case "LT":
-                            // Keep the default field — do not overwrite.
-                            break;
-
-                        case "TITLE":
-                            attRef.TextString = title;
-                            break;
-
-                        case "SCALE":
-                            attRef.TextString = scaleName;
-                            break;
-
-                        case "ARCHREF":
-                            attRef.TextString = string.Empty;
-                            break;
+                        case "UT":    ar.TextString = viewNumber.ToString(); break;
+                        case "LT":    /* keep default field — do not overwrite */ break;
+                        case "TITLE": ar.TextString = title;                  break;
+                        case "SCALE": ar.TextString = scaleName;              break;
+                        case "ARCHREF": ar.TextString = string.Empty;         break;
                     }
                 }
+
+                // ── Dynamic property "Distance1" = viewport width ────────────
+                SetDynamicProperty(bref, "Distance1", vp.Width);
             }
 
             tr.Commit();
+
+            // Force field evaluation so all field-based attributes display correctly
+            AttributeFieldHelper.EvaluateFieldsNow();
+
             ed.WriteMessage($"\nIWC_VIEW: Inserted {sorted.Count} view label(s).\n");
+        }
+
+        // -----------------------------------------------------------------------
+        // Annotative helpers — exact copies of block-browser private statics
+        // -----------------------------------------------------------------------
+
+        private static bool IsAnnotativeBtr(ObjectId btrId, Transaction tr)
+        {
+            if (btrId.IsNull) return false;
+            try
+            {
+                var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+                return btr.Annotative == AnnotativeStates.True;
+            }
+            catch { return false; }
+        }
+
+        private static void EnsureAnnotativeScaleOn(DBObject obj, Database db, string scaleName = "1:1")
+        {
+            if (obj == null || db == null) return;
+            var ocm = db.ObjectContextManager;
+            if (ocm == null) return;
+            var occ = ocm.GetContextCollection("ACDB_ANNOTATIONSCALES");
+            if (occ == null) return;
+            var scale = occ.GetContext(scaleName);
+            if (scale == null)
+            {
+                using var ns = new AnnotationScale { Name = scaleName, PaperUnits = 1.0, DrawingUnits = 1.0 };
+                occ.AddContext(ns);
+                scale = occ.GetContext(scaleName);
+            }
+            try { obj.AddContext(scale); } catch { }
         }
 
         // -----------------------------------------------------------------------
