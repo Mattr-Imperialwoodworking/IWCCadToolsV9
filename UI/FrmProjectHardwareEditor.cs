@@ -149,8 +149,8 @@ namespace IWCCadToolsV9.UI
             }
             else
             {
-                // Add mode — show preview of auto-number
-                UpdateHdwNoPreview();
+                // Add mode — query DB for the real next number
+                await RefreshHdwNoPreviewAsync();
             }
 
             btnSave.Enabled   = true;
@@ -158,11 +158,61 @@ namespace IWCCadToolsV9.UI
             cboVendor.Enabled = true;
         }
 
-        private void UpdateHdwNoPreview()
+        /// <summary>
+        /// Queries the DB for the next available HdwNo for the currently
+        /// selected group and writes it into the (read-only) txtHdwNo field.
+        /// Called on initial load and whenever the group selection changes.
+        /// </summary>
+        private async Task RefreshHdwNoPreviewAsync()
         {
             if (_isEdit) return;
-            var grp = cboGroup.SelectedItem as HdwGroupItem;
-            txtHdwNo.Text = grp != null ? $"{grp.GroupTag}## (auto)" : "(auto-assigned)";
+            if (cboGroup.SelectedItem is not HdwGroupItem grp)
+            {
+                txtHdwNo.Text = "(select a group)";
+                return;
+            }
+
+            txtHdwNo.Text = "…";
+            btnSave.Enabled = false;
+
+            string next;
+            try
+            {
+                next = await Task.Run(() => ComputeNextHdwNo(grp.Id, grp.GroupTag));
+            }
+            catch
+            {
+                next = $"{grp.GroupTag}01";   // safe fallback
+            }
+
+            txtHdwNo.Text   = next;
+            btnSave.Enabled = true;
+        }
+
+        private static string ComputeNextHdwNo(int groupId, string groupTag)
+        {
+            using var conn = IWCConn.GetSqlConnection();
+            conn.Open();
+            using var cmd = new SqlCommand(
+                "SELECT HdwNo FROM dbo.Proj_Hdw WHERE HdwGroup = @gid;", conn);
+            cmd.Parameters.AddWithValue("@gid", groupId);
+
+            int maxSeq = 0;
+            using (var rdr = cmd.ExecuteReader())
+                while (rdr.Read())
+                {
+                    string? no = rdr[0] as string;
+                    if (no == null) continue;
+                    if (no.StartsWith(groupTag, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string suffix = no.Substring(groupTag.Length);
+                        if (int.TryParse(suffix, out int seq))
+                            maxSeq = Math.Max(maxSeq, seq);
+                    }
+                }
+
+            int next = maxSeq + 1;
+            return groupTag + (next < 10 ? $"0{next}" : next.ToString());
         }
 
         private static FormData FetchFormData(int itemId, bool loadRecord)
@@ -240,7 +290,7 @@ namespace IWCCadToolsV9.UI
             btnCancel.Click  += (_, _) => DialogResult = DialogResult.Cancel;
 
             chkApproved.CheckedChanged += (_, _) => dtpApprove.Enabled = chkApproved.Checked;
-            cboGroup.SelectedIndexChanged += (_, _) => UpdateHdwNoPreview();
+            cboGroup.SelectedIndexChanged += (_, _) => _ = RefreshHdwNoPreviewAsync();
 
             btnBrowseImage.Click += BtnBrowseImage_Click;
             btnClearImage.Click  += (_, _) => { _imageBytes = null; pictImage.Image = null; };
@@ -295,6 +345,7 @@ namespace IWCCadToolsV9.UI
 
             var args = new SaveArgs
             {
+                HdwNo        = _isEdit ? txtHdwNo.Text.Trim() : txtHdwNo.Text.Trim(),  // always use displayed value
                 HdwDesc      = txtHdwDesc.Text.Trim(),
                 GroupId      = grp.Id,
                 GroupTag     = grp.GroupTag,
@@ -349,30 +400,26 @@ namespace IWCCadToolsV9.UI
 
         private static (int newId, string hdwNo) InsertHardware(int projectId, SaveArgs a)
         {
+            // HdwNo was computed and shown in the dialog at load time — use it directly.
+            string hdwNo = a.HdwNo ?? ComputeNextHdwNo(a.GroupId, a.GroupTag ?? "H");
+
             using var conn = IWCConn.GetSqlConnection();
             conn.Open();
-
-            // Generate next HdwNo within a transaction to avoid races
-            using var tx = conn.BeginTransaction();
-
-            string hdwNo = GenerateNextHdwNo(conn, tx, a.GroupId, a.GroupTag ?? "H");
-
             using var cmd = new SqlCommand(@"
                 INSERT INTO dbo.Proj_Hdw
-                    (Proj_ID, HdwNo, HdwDesc, HdwGroup,  HdwUnit,
+                    (Proj_ID, HdwNo, HdwDesc, HdwGroup, HdwUnit,
                      HdwNotes, HdwApprove, HdwVendorID, HdwVendorNum, HdwVendorlink,
                      HdwByIWC, HdwImage, HdwEdit)
                 OUTPUT INSERTED.ID
                 VALUES
                     (@pid, @no, @desc, @grp, @unit,
                      @notes, @approve, @vid, @vnum, @vlink,
-                     @byiwc, @img, CAST(GETDATE() AS date));", conn, tx);
+                     @byiwc, @img, CAST(GETDATE() AS date));", conn);
 
             AddSqlParams(cmd, hdwNo, a);
             cmd.Parameters.AddWithValue("@pid", projectId);
 
             int newId = Convert.ToInt32(cmd.ExecuteScalar());
-            tx.Commit();
             return (newId, hdwNo);
         }
 
@@ -415,41 +462,6 @@ namespace IWCCadToolsV9.UI
             cmd.Parameters.Add("@img", System.Data.SqlDbType.Image).Value = (object?)a.ImageBytes ?? DBNull.Value;
         }
 
-        /// <summary>
-        /// Computes the next hardware number for the given group within an open transaction.
-        /// Pattern: {groupTag}{seq} where seq is zero-padded to at least 2 digits.
-        /// Example: "H01" + max existing "H0105" → "H0106"
-        /// </summary>
-        private static string GenerateNextHdwNo(SqlConnection conn, SqlTransaction tx,
-            int groupId, string groupTag)
-        {
-            using var cmd = new SqlCommand(
-                "SELECT HdwNo FROM dbo.Proj_Hdw WHERE HdwGroup = @gid WITH (UPDLOCK, HOLDLOCK);",
-                conn, tx);
-            cmd.Parameters.AddWithValue("@gid", groupId);
-
-            int maxSeq = 0;
-            using (var rdr = cmd.ExecuteReader())
-            {
-                while (rdr.Read())
-                {
-                    string? no = rdr[0] as string;
-                    if (no == null) continue;
-                    // Strip group tag prefix (case-insensitive) and parse remaining digits
-                    if (no.StartsWith(groupTag, StringComparison.OrdinalIgnoreCase))
-                    {
-                        string suffix = no.Substring(groupTag.Length);
-                        if (int.TryParse(suffix, out int seq))
-                            maxSeq = Math.Max(maxSeq, seq);
-                    }
-                }
-            }
-
-            int next = maxSeq + 1;
-            // Zero-pad to at least 2 digits; allow natural overflow for 3+ digits
-            string seqStr = next < 10 ? $"0{next}" : next.ToString();
-            return groupTag + seqStr;
-        }
 
         private static object Nv(string? s) => string.IsNullOrEmpty(s) ? DBNull.Value : (object)s;
 
