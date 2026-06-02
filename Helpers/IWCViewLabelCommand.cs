@@ -117,7 +117,8 @@ namespace IWCCadToolsV9.Helpers
             var titleChoices = new List<string>();
             for (int i = 0; i < sorted.Count; i++)
             {
-                string? title = PromptForTitle(ed, existingCountForPrompt + i + 1);
+                string? title = PromptForTitle(ed, db, sorted[i].ObjectId,
+                                               existingCountForPrompt + i + 1);
                 if (title == null) { ed.WriteMessage("\nIWC_VIEW cancelled.\n"); return; }
                 titleChoices.Add(title);
             }
@@ -180,16 +181,46 @@ namespace IWCCadToolsV9.Helpers
                     if (ar == null) continue;
                     switch (ar.Tag.ToUpperInvariant())
                     {
-                        case "UT":    ar.TextString = viewNumber.ToString(); break;
-                        case "LT":    /* keep default field — do not overwrite */ break;
-                        case "TITLE": ar.TextString = title;                  break;
-                        case "SCALE": ar.TextString = scaleName;              break;
-                        case "ARCHREF": ar.TextString = string.Empty;         break;
+                        case "UT":
+                            ar.TextString = viewNumber.ToString();
+                            break;
+
+                        case "LT":
+                            // Keep default field — do not overwrite.
+                            break;
+
+                        case "TITLE":
+                            ar.TextString = title;
+                            break;
+
+                        case "SCALE":
+                            // Build a live field linked to the viewport's annotation scale
+                            // so the attribute updates automatically when the viewport scale changes.
+                            // Format mirrors the user-defined standard:
+                            //   %<\AcObjProp Object(%<\_ObjId {id}>%).AnnotationScale \f "%tc1">%
+                            // _ObjId uses the ObjectId's pointer value (OldIdPtr).
+                            // Falls back to static text if field creation fails.
+                            try
+                            {
+                                long vpPtr = vp.ObjectId.OldIdPtr.ToInt64();
+                                string scaleCode =
+                                    $@"%<\AcObjProp Object(%<\_ObjId {vpPtr}>%).AnnotationScale \f ""%tc1"">%";
+                                ar.SetField(new Field(scaleCode));
+                            }
+                            catch
+                            {
+                                ar.TextString = scaleName;  // static fallback
+                            }
+                            break;
+
+                        case "ARCHREF":
+                            ar.TextString = string.Empty;
+                            break;
                     }
                 }
 
-                // ── Dynamic property "Distance1" = viewport width ────────────
-                SetDynamicProperty(bref, "Distance1", vp.Width);
+                // ── Dynamic property "Distance1" = viewport width minus 1/2" ─
+                SetDynamicProperty(bref, "Distance1", vp.Width - 0.5);
             }
 
             tr.Commit();
@@ -287,18 +318,26 @@ namespace IWCCadToolsV9.Helpers
         }
 
         // -----------------------------------------------------------------------
-        // Prompt — view type
+        // Prompt — view type  (highlights the viewport while prompting)
         // -----------------------------------------------------------------------
 
-        private static string? PromptForTitle(Editor ed, int viewNumber)
+        private static string? PromptForTitle(Editor ed, Database db,
+            ObjectId vpId, int viewNumber)
         {
+            // Highlight the viewport so the user knows which one they're labelling
+            HighlightViewport(db, vpId, highlight: true);
+
             var pko = new PromptKeywordOptions(
-                $"\nView {viewNumber} — select type " +
+                $"\nView {viewNumber} (highlighted viewport) — " +
                 "[Plan/Elevation/Vsection/Hsection/Detail]: ",
                 "Plan Elevation Vsection Hsection Detail");
             pko.AllowNone = false;
 
             var pkr = ed.GetKeywords(pko);
+
+            // Always unhighlight regardless of result
+            HighlightViewport(db, vpId, highlight: false);
+
             if (pkr.Status != PromptStatus.OK) return null;
 
             return pkr.StringResult.ToUpperInvariant() switch
@@ -310,6 +349,22 @@ namespace IWCCadToolsV9.Helpers
                 "DETAIL"    => "DETAIL",
                 var other   => other
             };
+        }
+
+        private static void HighlightViewport(Database db, ObjectId vpId, bool highlight)
+        {
+            try
+            {
+                // StartOpenCloseTransaction is lightweight — designed for short-lived access
+                using var tr = db.TransactionManager.StartOpenCloseTransaction();
+                var ent = (Entity)tr.GetObject(vpId, OpenMode.ForRead);
+                if (highlight) ent.Highlight();
+                else           ent.Unhighlight();
+                tr.Commit();
+                // Force screen refresh so the highlight is visible before the prompt appears
+                Application.UpdateScreen();
+            }
+            catch { /* best-effort — prompt still works without visual feedback */ }
         }
 
         // -----------------------------------------------------------------------
