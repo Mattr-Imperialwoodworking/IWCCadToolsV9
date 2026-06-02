@@ -99,7 +99,17 @@ namespace IWCCadToolsV9.Helpers
 
             var table = new Table();
             table.SetDatabaseDefaults(db);
-            table.TableStyle = db.Tablestyle;
+            // Use "Standard" table style to avoid custom styles that bold the title row.
+            // Fall back to the current DB default if "Standard" doesn't exist.
+            try
+            {
+                var tst = (DBDictionary)tr.GetObject(db.TableStyleDictionaryId, OpenMode.ForRead);
+                if (tst.Contains("Standard"))
+                    table.TableStyle = tst.GetAt("Standard");
+                else
+                    table.TableStyle = db.Tablestyle;
+            }
+            catch { table.TableStyle = db.Tablestyle; }
 
             // Rows = 1 title + N data rows; Columns = 2
             int totalRows = components.Count + 1;
@@ -191,18 +201,12 @@ namespace IWCCadToolsV9.Helpers
         private static void SetCell(Table table, int row, int col,
             string text, double height, CellAlignment align,
             Autodesk.AutoCAD.Colors.Color? bgColor = null,
-            bool bold = false)
+            bool bold = false)   // bold param reserved for future use; not applied at cell level
         {
             var cell = table.Cells[row, col];
             cell.TextString = text;
             cell.TextHeight = height;
             cell.Alignment  = align;
-
-            // Suppress bold via MTEXT override when explicitly requested.
-            // AutoCAD title rows often inherit bold from the table style;
-            // prefixing with \b0; forces non-bold regardless of style.
-            if (!bold && cell.TextString.Length > 0)
-                cell.TextString = @"{\b0;" + cell.TextString + "}";
 
             if (bgColor != null)
             {
