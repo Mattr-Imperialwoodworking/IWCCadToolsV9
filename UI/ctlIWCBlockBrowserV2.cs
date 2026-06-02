@@ -1123,32 +1123,21 @@ namespace IWCCadToolsV9.UI
                     if (br != null)
                     {
                         var defId = !br.DynamicBlockTableRecord.IsNull ? br.DynamicBlockTableRecord : br.BlockTableRecord;
-
-                        // Get the definition name so we can render from the BTR directly —
-                        // same approach as CreateComponentUnderGroup which produces correct icons.
+                        // anonymous BTR → current visibility state only (for icon)
+                        var currentStateBtrId = br.BlockTableRecord;
                         string defName = Sanitize(GetBaseBlockName(br, tr));
 
-                        // Export DWG bytes (definition "as-is")
+                        // Export full dynamic definition as DWG bytes
                         string tempPath = ExportBlockDefinitionAsIs(db, defId, defName);
                         dwgBytes = System.IO.File.ReadAllBytes(tempPath);
                         try { System.IO.File.Delete(tempPath); } catch { /* ignore */ }
 
-                        // Render preview from the block definition (not the reference in context).
-                        // RenderBlockIconPng uses the BTR geometry directly, so layer colours,
-                        // viewport settings and context visibility cannot cause a black icon.
-                        try
-                        {
-                            previewPng = BlockIconRenderer.RenderBlockIconPng(
-                                db,
-                                defName,
-                                iconSizePx: 64,
-                                supersampleFactor: 2,
-                                background: System.Drawing.Color.Black,
-                                finalHairlinePx: 0.35f);
-                        }
-                        catch { previewPng = null; }
-
+                        // Commit before rendering — RenderIconForCurrentState opens
+                        // its own transactions and must not nest inside this one.
                         tr.Commit();
+
+                        // Render icon from current visibility state only
+                        previewPng = RenderIconForCurrentState(db, currentStateBtrId);
                         return true;
                     }
                     tr.Commit();
@@ -4964,15 +4953,13 @@ namespace IWCCadToolsV9.UI
 
                 // base definition + name (dynamic-safe)
                 var defId = !br.DynamicBlockTableRecord.IsNull ? br.DynamicBlockTableRecord : br.BlockTableRecord;
+                // br.BlockTableRecord = anonymous BTR (*U###) for dynamic blocks → current visibility state only
+                var currentStateBtrId = br.BlockTableRecord;
                 assetName = Sanitize(GetBaseBlockName(br, tr));
                 if (assetName.Length > 255) assetName = assetName.Substring(0, 255);
                 tr.Commit();
 
-                // export + bytes
-                //8-18 replaced - string tempDwg = ExportBlockDefinitionAsIs(db, defId, assetName);
-                //dwgBytes = File.ReadAllBytes(tempDwg);
-                //try { File.Delete(tempDwg); } catch { /* ignore */ }
-                // export + bytes
+                // export + bytes (full dynamic definition — preserves all states for future editing)
                 string tempDwg;
                 try
                 {
@@ -4987,20 +4974,10 @@ namespace IWCCadToolsV9.UI
                 dwgBytes = System.IO.File.ReadAllBytes(tempDwg);
                 try { System.IO.File.Delete(tempDwg); } catch { /* ignore */ }
 
-
-                // crisp icon from current DB definition
-                try
-                {
-                    previewPng = BlockIconRenderer.RenderBlockIconPng(
-                        db,
-                        assetName,              // the block def name you just exported/used
-                        iconSizePx: 64,         // a bit more detail than 48
-                        supersampleFactor: 2,   // lighter AA → preserves detail
-                        background: System.Drawing.Color.Black, // or Transparent if your UI blends it
-                        finalHairlinePx: 0.35f  // ~0.55 px final stroke
-                    );
-                }
-                catch { previewPng = null; }
+                // Icon — render ONLY the current visibility state.
+                // Using the anonymous BTR (currentStateBtrId) avoids the "ghostly overlay"
+                // that results from rendering the named BTR which contains all states.
+                previewPng = RenderIconForCurrentState(db, currentStateBtrId);
 
                 desc = $"Component from block '{assetName}' • {DateTime.Now:g}";
                 return true;
@@ -5553,6 +5530,141 @@ namespace IWCCadToolsV9.UI
             }
             return false;
         }
+
+        // -----------------------------------------------------------------------
+        // Icon rendering — current visibility state only
+        // -----------------------------------------------------------------------
+
+        private const string IconRenderTempBtr = "IWC__ICON_RENDER_TMP_0001";
+
+        /// <summary>
+        /// Renders a block icon showing ONLY the geometry that is currently visible
+        /// on screen (i.e. the current visibility state).
+        ///
+        /// For dynamic blocks, <paramref name="currentStateBtrId"/> should be
+        /// <c>br.BlockTableRecord</c> — the anonymous BTR (*U###) that AutoCAD
+        /// populates with just the entities for the active visibility state.
+        /// Rendering from this BTR avoids the "ghostly overlay" caused by rendering
+        /// the named BTR which contains all states' geometry at once.
+        ///
+        /// For regular (non-dynamic) blocks <c>br.BlockTableRecord</c> is the named
+        /// BTR, so this path produces the same result as before.
+        /// </summary>
+        private static byte[]? RenderIconForCurrentState(
+            Database db, ObjectId currentStateBtrId)
+        {
+            try
+            {
+                // ── Step 1: inspect the BTR ──────────────────────────────────
+                string btrName;
+                var entityIds = new System.Collections.Generic.List<ObjectId>();
+
+                using (var tr = db.TransactionManager.StartTransaction())
+                {
+                    var btr = (BlockTableRecord)tr.GetObject(
+                        currentStateBtrId, OpenMode.ForRead);
+                    btrName = btr.Name;
+
+                    // For non-anonymous BTRs (regular blocks), render directly —
+                    // no cloning needed.
+                    if (!btrName.StartsWith("*", StringComparison.Ordinal))
+                    {
+                        tr.Commit();
+                        try
+                        {
+                            return BlockIconRenderer.RenderBlockIconPng(
+                                db, btrName, 64, 2,
+                                System.Drawing.Color.Black, 0.35f);
+                        }
+                        catch { return null; }
+                    }
+
+                    // Collect entity ObjectIds from the anonymous BTR
+                    foreach (ObjectId eid in btr)
+                    {
+                        try
+                        {
+                            var ent = (Entity)tr.GetObject(eid, OpenMode.ForRead);
+                            if (!ent.IsErased) entityIds.Add(eid);
+                        }
+                        catch { }
+                    }
+                    tr.Commit();
+                }
+
+                if (entityIds.Count == 0) return null;   // empty state → nothing to show
+
+                // ── Step 2: clone entities into a temp named BTR ─────────────
+                using (var tr = db.TransactionManager.StartTransaction())
+                {
+                    var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForWrite);
+
+                    // Remove leftover from a previous call
+                    if (bt.Has(IconRenderTempBtr))
+                    {
+                        var old = (BlockTableRecord)tr.GetObject(
+                            bt[IconRenderTempBtr], OpenMode.ForWrite);
+                        var oldIds = new System.Collections.Generic.List<ObjectId>();
+                        foreach (ObjectId eid in old) oldIds.Add(eid);
+                        foreach (var eid in oldIds)
+                            try { ((DBObject)tr.GetObject(eid, OpenMode.ForWrite)).Erase(); }
+                            catch { }
+                        old.Erase();
+                    }
+
+                    var tempBtr = new BlockTableRecord { Name = IconRenderTempBtr };
+                    bt.Add(tempBtr);
+                    tr.AddNewlyCreatedDBObject(tempBtr, true);
+
+                    // Clone each entity from the anonymous BTR
+                    foreach (var eid in entityIds)
+                    {
+                        try
+                        {
+                            var ent = (Entity)tr.GetObject(eid, OpenMode.ForRead);
+                            var clone = (Entity)ent.Clone();
+                            tempBtr.AppendEntity(clone);
+                            tr.AddNewlyCreatedDBObject(clone, true);
+                        }
+                        catch { }
+                    }
+                    tr.Commit();
+                }
+
+                // ── Step 3: render from the temp named BTR ───────────────────
+                byte[]? png = null;
+                try
+                {
+                    png = BlockIconRenderer.RenderBlockIconPng(
+                        db, IconRenderTempBtr, 64, 2,
+                        System.Drawing.Color.Black, 0.35f);
+                }
+                catch { }
+
+                // ── Step 4: clean up ─────────────────────────────────────────
+                using (var tr = db.TransactionManager.StartTransaction())
+                {
+                    var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    if (bt.Has(IconRenderTempBtr))
+                    {
+                        var tmpBtr = (BlockTableRecord)tr.GetObject(
+                            bt[IconRenderTempBtr], OpenMode.ForWrite);
+                        var ids = new System.Collections.Generic.List<ObjectId>();
+                        foreach (ObjectId eid in tmpBtr) ids.Add(eid);
+                        foreach (var eid in ids)
+                            try { ((DBObject)tr.GetObject(eid, OpenMode.ForWrite)).Erase(); }
+                            catch { }
+                        tmpBtr.Erase();
+                    }
+                    tr.Commit();
+                }
+
+                return png;
+            }
+            catch { return null; }
+        }
+
+        // -----------------------------------------------------------------------
 
         private sealed record ExistingBlockInfo(int Id, string? BlockName, string? BlockTag);
 
