@@ -34,6 +34,8 @@ namespace IWCCadToolsV9.UI
 
         public int?   BlockId           { get; private set; }
         public string BlockNameValue    => txtName.Text.Trim();
+        /// <summary>User-friendly display name shown in the tree. Falls back to BlockName if empty.</summary>
+        public string BlockTagValue     => string.IsNullOrWhiteSpace(txtTag.Text) ? txtName.Text.Trim() : txtTag.Text.Trim();
         public string BlockDescValue    => txtDesc.Text;
         public string BlockMfrName      => txtMfrName.Text.Trim();
         public string BlockVendorName   => txtVendorName.Text.Trim();
@@ -71,13 +73,14 @@ namespace IWCCadToolsV9.UI
         // ---------------------------------------------------------------------------
 
         public FrmAssemblyEditor(
-            int blockId, string? blockName, string? blockDesc,
+            int blockId, string? blockName, string? blockTag, string? blockDesc,
             string? mfrName,  string? vendorName, string? vendorNum,
             string? notes,    string? linkUrl)
             : this()
         {
             BlockId            = blockId;
             txtName.Text       = blockName   ?? string.Empty;
+            txtTag.Text        = blockTag    ?? string.Empty;
             txtDesc.Text       = blockDesc   ?? string.Empty;
             txtMfrName.Text    = mfrName     ?? string.Empty;
             txtVendorName.Text = vendorName  ?? string.Empty;
@@ -102,7 +105,7 @@ namespace IWCCadToolsV9.UI
             lnkOpenLink.LinkClicked += (_, _) => OpenUrl();
 
             foreach (Control ctl in new Control[]
-                { txtName, txtDesc, txtMfrName, txtVendorName, txtVendorNum, txtNotes, txtLinkUrl })
+                { txtName, txtTag, txtDesc, txtMfrName, txtVendorName, txtVendorNum, txtNotes, txtLinkUrl })
             {
                 ctl.TextChanged += MarkDirty;
             }
@@ -190,6 +193,7 @@ namespace IWCCadToolsV9.UI
         {
             // ── Input controls ───────────────────────────────────────────────────────
             txtName       = new TextBox { Dock = DockStyle.Fill };
+            txtTag        = new TextBox { Dock = DockStyle.Fill };
             txtDesc       = new TextBox { Dock = DockStyle.Fill, Multiline = true,
                                           Height = 52, ScrollBars = ScrollBars.Vertical };
             txtMfrName    = new TextBox { Dock = DockStyle.Fill };
@@ -255,14 +259,15 @@ namespace IWCCadToolsV9.UI
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount    = 6,
+                RowCount    = 7,
                 Padding     = new Padding(8, 8, 8, 4),
                 AutoSize    = false
             };
             tblTop.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
             tblTop.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            tblTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // Block Name
+            tblTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // Block Name (AutoCAD internal)
+            tblTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // Display Name (BlockTag)
             tblTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));    // Description
             tblTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // Manufacturer
             tblTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // Vendor Name
@@ -281,12 +286,13 @@ namespace IWCCadToolsV9.UI
                 tblTop.Controls.Add(ctl, 1, row);
             }
 
-            AddTopRow(0, "Block Name:",   txtName);
-            AddTopRow(1, "Description:",  txtDesc);
-            AddTopRow(2, "Manufacturer:", txtMfrName);
-            AddTopRow(3, "Vendor Name:",  txtVendorName);
-            AddTopRow(4, "Vendor #:",     txtVendorNum);
-            AddTopRow(5, "Notes:",        txtNotes);
+            AddTopRow(0, "Block Name:",    txtName);
+            AddTopRow(1, "Display Name:",  txtTag);
+            AddTopRow(2, "Description:",   txtDesc);
+            AddTopRow(3, "Manufacturer:",  txtMfrName);
+            AddTopRow(4, "Vendor Name:",   txtVendorName);
+            AddTopRow(5, "Vendor #:",      txtVendorNum);
+            AddTopRow(6, "Notes:",         txtNotes);
 
             // ── Wire form ────────────────────────────────────────────────────────────
             // pnlBottom MUST be added before tblTop – Dock=Bottom claims space first,
@@ -310,6 +316,7 @@ namespace IWCCadToolsV9.UI
         // ---------------------------------------------------------------------------
 
         private TextBox   txtName       = null!;
+        private TextBox   txtTag        = null!;
         private TextBox   txtDesc       = null!;
         private TextBox   txtMfrName    = null!;
         private TextBox   txtVendorName = null!;

@@ -188,7 +188,7 @@ namespace IWCCadToolsV9.UI
                 // 2) Blocks under groups (from assoc)
                 var dtAssoc = new DataTable();
                 using (var da = new SqlDataAdapter(@"
-                        SELECT a.GroupID, b.ID AS BlockID, b.BlockName
+                        SELECT a.GroupID, b.ID AS BlockID, b.BlockName, b.BlockTag
                         FROM dbo.Dwg_BlockGroups_Assoc a
                         INNER JOIN dbo.Dwg_Block b ON b.ID = a.BlockID
                         ORDER BY a.GroupID, b.BlockName;", conn.OpenConn))
@@ -200,28 +200,27 @@ namespace IWCCadToolsV9.UI
                 {
                     int gid = Convert.ToInt32(r["GroupID"]);
                     int bid = Convert.ToInt32(r["BlockID"]);
-                    string bname = Convert.ToString(r["BlockName"]) ?? $"Block_{bid}";
+                    string bname    = Convert.ToString(r["BlockName"]) ?? $"Block_{bid}";
+                    string? btag    = r["BlockTag"] == DBNull.Value ? null : Convert.ToString(r["BlockTag"]);
+                    string nodeText = !string.IsNullOrWhiteSpace(btag) ? btag : bname;
 
                     if (_nodeByGroupId.TryGetValue(gid, out var gnode))
                     {
-                        // Create the block node with a safe default (Assembly)
-                        var bnode = new TreeNode(bname)
+                        var bnode = new TreeNode(nodeText)
                         {
-                            Tag = new BlockTag { BlockId = bid, Name = bname, ParentGroupId = gid },
+                            Tag = new BlockTag { BlockId = bid, Name = bname, DisplayName = btag, ParentGroupId = gid },
                             ImageKey = ICON_ASSEMBLY,
                             SelectedImageKey = ICON_ASSEMBLY
                         };
 
                         gnode.Nodes.Add(bnode);
-
-                        // If assets are already cached, set Component vs Assembly icon now
-                        UpdateBlockNodeVisual(bnode, bid);  // flips to ICON_COMPONENT when 1 .dwg asset
+                        UpdateBlockNodeVisual(bnode, bid);
                     }
                 }
 
                 // 3) Orphan blocks into default group
                 using (var cmd = new SqlCommand(@"
-                        SELECT b.ID, b.BlockName
+                        SELECT b.ID, b.BlockName, b.BlockTag
                         FROM dbo.Dwg_Block b
                         LEFT JOIN dbo.Dwg_BlockGroups_Assoc a ON a.BlockID = b.ID
                         WHERE a.BlockID IS NULL
@@ -232,21 +231,20 @@ namespace IWCCadToolsV9.UI
                     {
                         while (rdr.Read())
                         {
-                            int bid = rdr.GetInt32(0);
-                            string bname = rdr.IsDBNull(1) ? $"Block_{bid}" : rdr.GetString(1);
+                            int bid      = rdr.GetInt32(rdr.GetOrdinal("ID"));
+                            string bname = rdr.IsDBNull(rdr.GetOrdinal("BlockName")) ? $"Block_{bid}" : rdr.GetString(rdr.GetOrdinal("BlockName"));
+                            string? btag = rdr.IsDBNull(rdr.GetOrdinal("BlockTag"))  ? null : rdr.GetString(rdr.GetOrdinal("BlockTag"));
+                            string nodeText = !string.IsNullOrWhiteSpace(btag) ? btag : bname;
 
-                            // Create the block node with a safe default (Assembly)
-                            var bnode = new TreeNode(bname)
+                            var bnode = new TreeNode(nodeText)
                             {
-                                Tag = new BlockTag { BlockId = bid, Name = bname, ParentGroupId = DEFAULT_GROUP_ID },
+                                Tag = new BlockTag { BlockId = bid, Name = bname, DisplayName = btag, ParentGroupId = DEFAULT_GROUP_ID },
                                 ImageKey = ICON_ASSEMBLY,
                                 SelectedImageKey = ICON_ASSEMBLY
                             };
 
                             defNode.Nodes.Add(bnode);
-
-                            // If assets are already cached, set Component vs Assembly icon now
-                            UpdateBlockNodeVisual(bnode, bid);  // flips to ICON_COMPONENT when 1 .dwg asset
+                            UpdateBlockNodeVisual(bnode, bid);
                         }
                     }
                 }
@@ -1792,9 +1790,11 @@ namespace IWCCadToolsV9.UI
         private class BlockTag
         {
             public int BlockId { get; set; }
+            /// <summary>BlockName — used as the AutoCAD block table key on insertion.</summary>
             public string? Name { get; set; }
+            /// <summary>BlockTag — user-friendly display name shown in the tree. Null if not set.</summary>
+            public string? DisplayName { get; set; }
             public int ParentGroupId { get; set; }
-
             public bool IsComponent { get; set; }
         }
 
@@ -5233,6 +5233,7 @@ namespace IWCCadToolsV9.UI
         //-------------------------------------------------------------------------------------------------------------------------
         private int InsertBlock(
              string name,
+             string blockTag,
              string desc,
              string mfrName,
              string vendorName,
@@ -5245,26 +5246,27 @@ namespace IWCCadToolsV9.UI
 
             using var cmd = new Microsoft.Data.SqlClient.SqlCommand(@"
                         INSERT INTO dbo.Dwg_Block
-                            (BlockName, BlockDesc,
+                            (BlockName, BlockTag, BlockDesc,
                              BlockMfrID, BlockMfrName,
                              BlockVendorID, BlockVendorName, BlockVendorNum,
                              BlockNotes, BlockLinkUrl,
                              BlockDateCreate, BlockDateModify)
                         OUTPUT INSERTED.ID
                         VALUES
-                            (@n, @d,
+                            (@n, @tag, @d,
                              NULL, @mname,
                              NULL, @vname, @vnum,
                              @notes, @link,
                              SYSUTCDATETIME(), SYSUTCDATETIME());", conn.OpenConn);
 
-            cmd.Parameters.AddWithValue("@n", (object?)name ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@d", (object?)desc ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@mname", (object?)mfrName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@n",     (object?)name     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@tag",   (object?)blockTag ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@d",     (object?)desc     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@mname", (object?)mfrName  ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@vname", (object?)vendorName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@vnum", (object?)vendorNum ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@notes", (object?)notes ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@link", (object?)linkUrl ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@vnum",  (object?)vendorNum  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@notes", (object?)notes    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@link",  (object?)linkUrl  ?? DBNull.Value);
 
             var id = Convert.ToInt32(Convert.ToDecimal(cmd.ExecuteScalar()));
             conn.DBClose();
@@ -5274,6 +5276,7 @@ namespace IWCCadToolsV9.UI
         private void UpdateBlock(
                     int blockId,
                     string name,
+                    string blockTag,
                     string desc,
                     string mfrName,
                     string vendorName,
@@ -5287,6 +5290,7 @@ namespace IWCCadToolsV9.UI
             using var cmd = new Microsoft.Data.SqlClient.SqlCommand(@"
                         UPDATE dbo.Dwg_Block
                         SET BlockName      = @n,
+                            BlockTag       = @tag,
                             BlockDesc      = @d,
                             BlockMfrID     = NULL,
                             BlockMfrName   = @mname,
@@ -5298,14 +5302,15 @@ namespace IWCCadToolsV9.UI
                             BlockDateModify= SYSUTCDATETIME()
                         WHERE ID = @id;", conn.OpenConn);
 
-            cmd.Parameters.AddWithValue("@id", blockId);
-            cmd.Parameters.AddWithValue("@n", (object?)name ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@d", (object?)desc ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@mname", (object?)mfrName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@id",    blockId);
+            cmd.Parameters.AddWithValue("@n",     (object?)name     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@tag",   (object?)blockTag ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@d",     (object?)desc     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@mname", (object?)mfrName  ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@vname", (object?)vendorName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@vnum", (object?)vendorNum ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@notes", (object?)notes ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@link", (object?)linkUrl ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@vnum",  (object?)vendorNum  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@notes", (object?)notes    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@link",  (object?)linkUrl  ?? DBNull.Value);
 
             cmd.ExecuteNonQuery();
             conn.DBClose();
@@ -5316,6 +5321,8 @@ namespace IWCCadToolsV9.UI
         {
             public int Id { get; set; }
             public string? BlockName { get; set; }
+            /// <summary>User-friendly display name (BlockTag). Used for tree node text.</summary>
+            public string? BlockTag { get; set; }
             public string? BlockDesc { get; set; }
 
             // Simplified fields (text only)
@@ -5323,8 +5330,8 @@ namespace IWCCadToolsV9.UI
             public string? BlockVendorName { get; set; }
             public string? BlockVendorNum { get; set; }
 
-            public string? BlockNotes { get; set; }     // plain multi-line notes
-            public string? BlockLinkUrl { get; set; }   // hyperlink
+            public string? BlockNotes { get; set; }
+            public string? BlockLinkUrl { get; set; }
         }
 
         private BlockDto? GetBlockById(int id)
@@ -5336,6 +5343,7 @@ namespace IWCCadToolsV9.UI
                 SELECT TOP (1)
                        b.ID,
                        b.BlockName,
+                       b.BlockTag,
                        b.BlockDesc,
                        b.BlockMfrName,
                        b.BlockVendorName,
@@ -5356,14 +5364,15 @@ namespace IWCCadToolsV9.UI
 
             var dto = new BlockDto
             {
-                Id = rdr.GetInt32(rdr.GetOrdinal("ID")),
-                BlockName = rdr["BlockName"] as string,
-                BlockDesc = rdr["BlockDesc"] as string,
-                BlockMfrName = rdr["BlockMfrName"] as string,
+                Id              = rdr.GetInt32(rdr.GetOrdinal("ID")),
+                BlockName       = rdr["BlockName"] as string,
+                BlockTag        = rdr["BlockTag"]  as string,
+                BlockDesc       = rdr["BlockDesc"] as string,
+                BlockMfrName    = rdr["BlockMfrName"] as string,
                 BlockVendorName = rdr["BlockVendorName"] as string,
-                BlockVendorNum = rdr["BlockVendorNum"] as string,
-                BlockNotes = rdr["BlockNotes"] as string,
-                BlockLinkUrl = rdr["BlockLinkUrl"] as string
+                BlockVendorNum  = rdr["BlockVendorNum"] as string,
+                BlockNotes      = rdr["BlockNotes"] as string,
+                BlockLinkUrl    = rdr["BlockLinkUrl"] as string
             };
 
             conn.DBClose();
@@ -5390,13 +5399,14 @@ namespace IWCCadToolsV9.UI
             blockName = dlg.BlockNameValue;
 
             newBlockId = InsertBlock(
-                name: dlg.BlockNameValue,
-                desc: dlg.BlockDescValue,
-                mfrName: dlg.BlockMfrNameValue,
+                name:       dlg.BlockNameValue,
+                blockTag:   dlg.BlockTagValue,
+                desc:       dlg.BlockDescValue,
+                mfrName:    dlg.BlockMfrNameValue,
                 vendorName: dlg.BlockVendorNameValue,
-                vendorNum: dlg.BlockVendorNumValue,
-                notes: dlg.BlockNotesValue,
-                linkUrl: dlg.BlockLinkUrlValue
+                vendorNum:  dlg.BlockVendorNumValue,
+                notes:      dlg.BlockNotesValue,
+                linkUrl:    dlg.BlockLinkUrlValue
             );
 
             // If a group is selected, associate the new assembly to it right away.
@@ -5475,37 +5485,39 @@ namespace IWCCadToolsV9.UI
             }
 
             using var dlg = new IWCCadToolsV9.UI.FrmAssemblyEditor(
-                blockId: b.Id,
-                blockName: b.BlockName,
-                blockDesc: b.BlockDesc,
-                mfrName: b.BlockMfrName,
+                blockId:    b.Id,
+                blockName:  b.BlockName,
+                blockTag:   b.BlockTag,
+                blockDesc:  b.BlockDesc,
+                mfrName:    b.BlockMfrName,
                 vendorName: b.BlockVendorName,
-                vendorNum: b.BlockVendorNum,
-                notes: b.BlockNotes,
-                linkUrl: b.BlockLinkUrl
+                vendorNum:  b.BlockVendorNum,
+                notes:      b.BlockNotes,
+                linkUrl:    b.BlockLinkUrl
             );
 
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
             UpdateBlock(
-                blockId: b.Id,
-                name: dlg.BlockNameValue,
-                desc: dlg.BlockDescValue,
-                mfrName: dlg.BlockMfrNameValue,
+                blockId:    b.Id,
+                name:       dlg.BlockNameValue,
+                blockTag:   dlg.BlockTagValue,
+                desc:       dlg.BlockDescValue,
+                mfrName:    dlg.BlockMfrNameValue,
                 vendorName: dlg.BlockVendorNameValue,
-                vendorNum: dlg.BlockVendorNumValue,
-                notes: dlg.BlockNotesValue,
-                linkUrl: dlg.BlockLinkUrlValue
+                vendorNum:  dlg.BlockVendorNumValue,
+                notes:      dlg.BlockNotesValue,
+                linkUrl:    dlg.BlockLinkUrlValue
             );
 
-            // Refresh & reselect
+            // Refresh & reselect — node text uses BlockTag (display name)
             LoadGroupsAndBlocks();
             var node = FindBlockNodeById(b.Id);
             if (node != null)
             {
                 treeGroups.SelectedNode = node;
                 node.EnsureVisible();
-                node.Text = dlg.BlockNameValue; // reflect rename
+                node.Text = dlg.BlockTagValue;   // reflect rename using display name
             }
         }
 
