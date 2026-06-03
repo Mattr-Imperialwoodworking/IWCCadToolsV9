@@ -1403,6 +1403,67 @@ namespace IWCCadToolsV9.UI
 
 
         // -----------------------------------------------------------------------
+        // Dynamic block re-evaluation helper
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Finds every block reference in model space and paper space whose
+        /// <c>DynamicBlockTableRecord</c> matches <paramref name="blockName"/>,
+        /// opens it for write, and calls <c>RecordGraphicsModified(true)</c>.
+        /// This marks the reference's anonymous BTR as dirty so AutoCAD rebuilds
+        /// it on the next REGEN, applying the new dynamic block definition.
+        /// Returns the count of references marked.
+        /// </summary>
+        private static int MarkDynamicRefsForRegen(Database db, string blockName)
+        {
+            int count = 0;
+            try
+            {
+                using var tr = db.TransactionManager.StartTransaction();
+                var bt = (Autodesk.AutoCAD.DatabaseServices.BlockTable)
+                         tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+                if (!bt.Has(blockName)) { tr.Commit(); return 0; }
+                ObjectId namedBtrId = bt[blockName];
+
+                var spaceIds = new[]
+                {
+                    Autodesk.AutoCAD.DatabaseServices.SymbolUtilityServices
+                        .GetBlockModelSpaceId(db),
+                    Autodesk.AutoCAD.DatabaseServices.SymbolUtilityServices
+                        .GetBlockPaperSpaceId(db)
+                };
+
+                foreach (var spaceId in spaceIds)
+                {
+                    var space = (Autodesk.AutoCAD.DatabaseServices.BlockTableRecord)
+                                tr.GetObject(spaceId, OpenMode.ForRead);
+
+                    foreach (ObjectId entId in space)
+                    {
+                        var bref = tr.GetObject(entId, OpenMode.ForRead)
+                                   as Autodesk.AutoCAD.DatabaseServices.BlockReference;
+                        if (bref == null) continue;
+
+                        // DynamicBlockTableRecord points to the named BTR even for
+                        // references that are stored against an anonymous BTR.
+                        if (bref.DynamicBlockTableRecord == namedBtrId)
+                        {
+                            var brefW = (Autodesk.AutoCAD.DatabaseServices.BlockReference)
+                                        tr.GetObject(entId, OpenMode.ForWrite);
+                            brefW.RecordGraphicsModified(true);
+                            count++;
+                        }
+                    }
+                }
+
+                tr.Commit();
+            }
+            catch { /* best-effort */ }
+            return count;
+        }
+
+        // -----------------------------------------------------------------------
         // Redefine — update an existing block definition without inserting
         // -----------------------------------------------------------------------
 
@@ -1461,21 +1522,36 @@ namespace IWCCadToolsV9.UI
             {
                 using (doc.LockDocument())
                 {
-                    // Replace the existing definition with the latest from the DB
+                    // ── 1. Replace the block definition ──────────────────────
                     ImportBlockDefinitionFromFile(db, tempPath, desiredName,
                         Autodesk.AutoCAD.DatabaseServices.DuplicateRecordCloning.Replace);
 
-                    // Restore field expressions that WblockCloneObjects may strip
+                    // ── 2. Restore field expressions stripped by WblockClone ─
                     AttributeFieldHelper.PatchFieldsFromSource(db, tempPath, desiredName);
 
-                    // Push the updated definition to every reference in the drawing
+                    // ── 3. Sync attribute values on all existing references ───
                     int count = AttributeFieldHelper.ResyncAllBlockReferences(
                         db, desiredName, removeOrphaned: false);
 
+                    // ── 4. Dynamic block re-evaluation ───────────────────────
+                    // WblockCloneObjects.Replace updates the named BTR but
+                    // existing references still point to old anonymous BTRs
+                    // (*U###).  We must mark every matching reference as
+                    // graphics-modified so AutoCAD rebuilds the anonymous BTRs
+                    // on the next REGEN.
+                    int dynCount = MarkDynamicRefsForRegen(db, desiredName);
+
                     ed.WriteMessage(
                         $"\nIWC: Block '{desiredName}' redefined — " +
-                        $"{count} reference(s) synchronised.\n");
+                        $"{count} reference(s) attribute-synced" +
+                        (dynCount > 0 ? $", {dynCount} dynamic reference(s) queued for regen" : "") +
+                        ".\n");
                 }
+
+                // ── 5. REGEN outside the lock ─────────────────────────────────
+                // Forces AutoCAD to rebuild anonymous BTRs for all dynamic block
+                // references that were marked dirty in step 4.
+                doc.SendStringToExecute("_.REGEN\n", true, false, false);
             }
             finally
             {
