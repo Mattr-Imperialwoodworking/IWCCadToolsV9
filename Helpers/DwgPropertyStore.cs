@@ -57,6 +57,9 @@ namespace IWCCadToolsV9.Helpers
                 [KeyPMIni]      = project.PMIni,
             };
 
+            // Summary tab — Title = series name, Author = drafter's full name
+            SyncSummaryInfo(doc, project, dash);
+
             if (dash != null)
             {
                 values[KeyDashId]  = dash.DashId.ToString();
@@ -203,6 +206,59 @@ namespace IWCCadToolsV9.Helpers
         /// or null if the user is not found or the DB is unreachable.
         /// Matches UserLogin against Environment.UserName (case-insensitive).
         /// </summary>
+        // -----------------------------------------------------------------------
+        // Summary Info sync
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Writes Drawing Properties → Summary tab fields:
+        ///   Title   = dash series name (DashDesc), falls back to project name
+        ///   Author  = drafter's full name from dbo.Mng_Users (UserName)
+        /// Called automatically from SyncFromProject.
+        /// </summary>
+        private static void SyncSummaryInfo(Document doc, ProjectRecord project, DashRecord? dash)
+        {
+            try
+            {
+                string title  = !string.IsNullOrWhiteSpace(dash?.DashDesc)
+                                ? dash!.DashDesc
+                                : project.Name;
+                string author = LookupCurrentUserFullName() ?? string.Empty;
+
+                using (doc.LockDocument())
+                {
+                    var db      = doc.Database;
+                    var builder = new Autodesk.AutoCAD.DatabaseServices.DatabaseSummaryInfoBuilder(
+                                      db.SummaryInfo);
+                    builder.Title  = title;
+                    if (!string.IsNullOrWhiteSpace(author))
+                        builder.Author = author;
+                    db.SummaryInfo = builder.ToDatabaseSummaryInfo();
+                }
+            }
+            catch { /* non-fatal — summary fields are best-effort */ }
+        }
+
+        /// <summary>
+        /// Returns the full user name (UserName) for the current Windows login,
+        /// or null if not found or the DB is unreachable.
+        /// </summary>
+        private static string? LookupCurrentUserFullName()
+        {
+            try
+            {
+                string login = Environment.UserName;
+                using var conn = IWCConn.GetSqlConnection();
+                conn.Open();
+                using var cmd = new SqlCommand(
+                    "SELECT TOP 1 UserName FROM dbo.Mng_Users " +
+                    "WHERE UserLogin = @login AND UserStatus = 'Active';", conn);
+                cmd.Parameters.AddWithValue("@login", login);
+                return cmd.ExecuteScalar() as string;
+            }
+            catch { return null; }
+        }
+
         private static string? LookupCurrentUserInitials()
         {
             try

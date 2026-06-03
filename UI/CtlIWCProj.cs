@@ -129,13 +129,70 @@ namespace IWCCadToolsV9.UI
 
         private void LoadFileProps()
         {
-            txtFProjNum.Text    = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyProjNum)    ?? "NA";
-            txtFProjName.Text   = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyProjName)   ?? "NA";
-            txtFArch.Text       = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyArchitect)  ?? "NA";
-            txtFCont.Text       = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyContractor) ?? "NA";
-            txtFPM.Text         = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyPMIni)      ?? "NA";
-            txtFSeriesNo.Text   = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyDashNum)    ?? "NA";
-            txtFSeriesName.Text = Helpers.AcadFilePropHelper.GetCustomProperty(Helpers.DwgPropertyStore.KeyDashName)   ?? "NA";
+            // ── Custom Properties grid ────────────────────────────────────
+            dgvCustomProps.Rows.Clear();
+            var all = Helpers.AcadFilePropHelper.GetAllCustomProperties();
+            foreach (var kv in all)
+                dgvCustomProps.Rows.Add(kv.Key, kv.Value);
+
+            // ── Summary tab ───────────────────────────────────────────────
+            var summ = Helpers.AcadFilePropHelper.GetSummaryProps();
+            if (summ != null)
+            {
+                txtSummTitle.Text     = summ.Title;
+                txtSummSubject.Text   = summ.Subject;
+                txtSummAuthor.Text    = summ.Author;
+                txtSummKeywords.Text  = summ.Keywords;
+                txtSummHyperlink.Text = summ.HyperlinkBase;
+                txtSummRevision.Text  = summ.RevisionNumber;
+                txtSummComments.Text  = summ.Comments;
+            }
+
+            // ── File Info tab ─────────────────────────────────────────────
+            var info = Helpers.AcadFilePropHelper.GetFileInfoProps();
+            if (info != null)
+            {
+                txtInfoFile.Text      = info.FileName     ?? string.Empty;
+                txtInfoLocation.Text  = info.Location     ?? string.Empty;
+                txtInfoSize.Text      = info.SizeBytes > 0
+                    ? $"{info.SizeBytes / 1024.0 / 1024.0:F2} MB ({info.SizeBytes:N0} bytes)"
+                    : string.Empty;
+                txtInfoCreated.Text   = info.Created?.ToString("g")  ?? string.Empty;
+                txtInfoModified.Text  = info.Modified?.ToString("g") ?? string.Empty;
+                txtInfoAccessed.Text  = info.Accessed?.ToString("g") ?? string.Empty;
+                txtInfoLastSaved.Text = info.LastSavedBy ?? string.Empty;
+            }
+        }
+
+        private void BtnApplySummary_Click(object? sender, EventArgs e)
+        {
+            Helpers.AcadFilePropHelper.SetSummaryProps(new Helpers.AcadFilePropHelper.SummaryProps
+            {
+                Title         = txtSummTitle.Text.Trim(),
+                Subject       = txtSummSubject.Text.Trim(),
+                Author        = txtSummAuthor.Text.Trim(),
+                Keywords      = txtSummKeywords.Text.Trim(),
+                HyperlinkBase = txtSummHyperlink.Text.Trim(),
+                Comments      = txtSummComments.Text,
+            });
+            LoadFileProps();
+        }
+
+        private static TextBox AddFilePropRow(TableLayoutPanel tbl, int row, string label)
+        {
+            tbl.Controls.Add(new Label
+            {
+                Text = label, AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 6, 4, 0)
+            }, 0, row);
+            var tb = new TextBox
+            {
+                Dock = DockStyle.Fill, ReadOnly = true,
+                BackColor = System.Drawing.SystemColors.Window
+            };
+            tbl.Controls.Add(tb, 1, row);
+            return tb;
         }
 
         private void ClearProjectFields()
@@ -221,40 +278,104 @@ namespace IWCCadToolsV9.UI
             grpProj.Controls.Add(btnPanel);
             tabProj.Controls.Add(grpProj);
 
-            // --- Tab 2: File Properties ---
-            var grpFile = new GroupBox
-            {
-                Text = "DWG Custom File Properties", Dock = DockStyle.Fill,
-                Padding = new Padding(8)
-            };
-            var tblF = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 8,
-                Padding = new Padding(4)
-            };
-            tblF.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-            tblF.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            // --- Tab 2: File Properties — inner TabControl ---
+            var fileTabCtl = new TabControl { Dock = DockStyle.Fill };
 
-            txtFProjNum    = AddRow(tblF, 0, "Proj Number:");
-            txtFProjName   = AddRow(tblF, 1, "Proj Name:");
-            txtFArch       = AddRow(tblF, 2, "Architect:");
-            txtFCont       = AddRow(tblF, 3, "Contractor:");
-            txtFPM         = AddRow(tblF, 4, "Project PM:");
-            txtFSeriesNo   = AddRow(tblF, 5, "Series No:");
-            txtFSeriesName = AddRow(tblF, 6, "Series Name:");
-
-            var btnPanelF = new FlowLayoutPanel
+            // ── Sub-tab A: Custom Properties ──────────────────────────────
+            var subCustom = new TabPage("Custom Properties");
+            dgvCustomProps = new DataGridView
             {
-                Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft,
-                AutoSize = true, Padding = new Padding(4)
+                Dock = DockStyle.Fill, ReadOnly = true,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false, AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false, RowHeadersVisible = false,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                BorderStyle = BorderStyle.None,
             };
-            btnSyncTitleblock = new Button { Text = "Sync Title Block", Width = 140, Height = 30 };
+            dgvCustomProps.Columns.Add("PropName",  "Property");
+            dgvCustomProps.Columns.Add("PropValue", "Value");
+            dgvCustomProps.Columns["PropName"].FillWeight  = 40;
+            dgvCustomProps.Columns["PropValue"].FillWeight = 60;
+
+            var btnSyncRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom, Height = 36,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(4, 4, 4, 4)
+            };
+            btnSyncTitleblock = new Button { Text = "Sync Title Block", Width = 140, Height = 28 };
             btnSyncTitleblock.Click += btnSyncTitleblock_Click;
-            btnPanelF.Controls.Add(btnSyncTitleblock);
+            btnSyncRow.Controls.Add(btnSyncTitleblock);
+            subCustom.Controls.Add(dgvCustomProps);
+            subCustom.Controls.Add(btnSyncRow);
 
-            grpFile.Controls.Add(tblF);
-            grpFile.Controls.Add(btnPanelF);
-            tabFile.Controls.Add(grpFile);
+            // ── Sub-tab B: Summary ────────────────────────────────────────
+            var subSummary = new TabPage("Summary");
+            var tblSumm = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7,
+                Padding = new Padding(6, 6, 6, 4)
+            };
+            tblSumm.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+            tblSumm.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 6; i++)
+                tblSumm.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            tblSumm.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Comments
+
+            txtSummTitle      = AddFilePropRow(tblSumm, 0, "Title:");
+            txtSummSubject    = AddFilePropRow(tblSumm, 1, "Subject:");
+            txtSummAuthor     = AddFilePropRow(tblSumm, 2, "Author:");
+            txtSummKeywords   = AddFilePropRow(tblSumm, 3, "Keywords:");
+            txtSummHyperlink  = AddFilePropRow(tblSumm, 4, "Hyperlink:");
+            txtSummRevision   = AddFilePropRow(tblSumm, 5, "Revision:");
+            txtSummComments   = new TextBox
+            {
+                Dock = DockStyle.Fill, Multiline = true, ReadOnly = false,
+                BackColor = System.Drawing.SystemColors.Window, ScrollBars = ScrollBars.Vertical
+            };
+            tblSumm.Controls.Add(new Label { Text = "Comments:", AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 4, 4, 0) }, 0, 6);
+            tblSumm.Controls.Add(txtSummComments, 1, 6);
+
+            var btnApplySumm = new Button { Text = "Apply Summary", Width = 130, Height = 28 };
+            btnApplySumm.Click += BtnApplySummary_Click;
+            var summBtnRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom, Height = 36,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(4, 4, 4, 4)
+            };
+            summBtnRow.Controls.Add(btnApplySumm);
+            subSummary.Controls.Add(tblSumm);
+            subSummary.Controls.Add(summBtnRow);
+
+            // ── Sub-tab C: File Info ──────────────────────────────────────
+            var subInfo = new TabPage("File Info");
+            var tblInfo = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7,
+                Padding = new Padding(6)
+            };
+            tblInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+            tblInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 7; i++)
+                tblInfo.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+
+            txtInfoFile       = AddFilePropRow(tblInfo, 0, "File:");
+            txtInfoLocation   = AddFilePropRow(tblInfo, 1, "Location:");
+            txtInfoSize       = AddFilePropRow(tblInfo, 2, "Size:");
+            txtInfoCreated    = AddFilePropRow(tblInfo, 3, "Created:");
+            txtInfoModified   = AddFilePropRow(tblInfo, 4, "Modified:");
+            txtInfoAccessed   = AddFilePropRow(tblInfo, 5, "Accessed:");
+            txtInfoLastSaved  = AddFilePropRow(tblInfo, 6, "Last Saved:");
+            subInfo.Controls.Add(tblInfo);
+
+            fileTabCtl.TabPages.Add(subCustom);
+            fileTabCtl.TabPages.Add(subSummary);
+            fileTabCtl.TabPages.Add(subInfo);
+            tabFile.Controls.Add(fileTabCtl);
 
             tabControl.Controls.AddRange(new Control[] { tabProj, tabFile });
             Controls.Add(tabControl);
@@ -278,23 +399,37 @@ namespace IWCCadToolsV9.UI
             return tb;
         }
 
-        // Controls
-        private TabControl tabControl       = null!;
-        private Label      lblOffline       = null!;
-        private TextBox    txtProjNum       = null!;
-        private TextBox    txtProjName      = null!;
-        private TextBox    txtArch          = null!;
-        private TextBox    txtCont          = null!;
-        private TextBox    txtPM            = null!;
-        private TextBox    txtFProjNum      = null!;
-        private TextBox    txtFProjName     = null!;
-        private TextBox    txtFArch         = null!;
-        private TextBox    txtFCont         = null!;
-        private TextBox    txtFPM           = null!;
-        private TextBox    txtFSeriesNo     = null!;
-        private TextBox    txtFSeriesName   = null!;
-        private Button     btnRefresh       = null!;
-        private Button     btnChangeProject = null!;
-        private Button     btnSyncTitleblock = null!;
+        // Controls — Tab 1 (Current Project)
+        private TabControl      tabControl       = null!;
+        private Label           lblOffline       = null!;
+        private TextBox         txtProjNum       = null!;
+        private TextBox         txtProjName      = null!;
+        private TextBox         txtArch          = null!;
+        private TextBox         txtCont          = null!;
+        private TextBox         txtPM            = null!;
+        private Button          btnRefresh       = null!;
+        private Button          btnChangeProject = null!;
+
+        // Controls — Tab 2 / Custom Properties sub-tab
+        private DataGridView    dgvCustomProps   = null!;
+        private Button          btnSyncTitleblock = null!;
+
+        // Controls — Tab 2 / Summary sub-tab
+        private TextBox         txtSummTitle     = null!;
+        private TextBox         txtSummSubject   = null!;
+        private TextBox         txtSummAuthor    = null!;
+        private TextBox         txtSummKeywords  = null!;
+        private TextBox         txtSummHyperlink = null!;
+        private TextBox         txtSummRevision  = null!;
+        private TextBox         txtSummComments  = null!;
+
+        // Controls — Tab 2 / File Info sub-tab
+        private TextBox         txtInfoFile      = null!;
+        private TextBox         txtInfoLocation  = null!;
+        private TextBox         txtInfoSize      = null!;
+        private TextBox         txtInfoCreated   = null!;
+        private TextBox         txtInfoModified  = null!;
+        private TextBox         txtInfoAccessed  = null!;
+        private TextBox         txtInfoLastSaved = null!;
     }
 }
