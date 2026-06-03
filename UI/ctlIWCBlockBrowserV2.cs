@@ -835,33 +835,15 @@ namespace IWCCadToolsV9.UI
         // Inside ctlIWCBlockBrowserV2
         // Overload: pass the clicked node when available (asset node OR block node)
 
-        private void InsertDwgAsset(AssetInfo? ai, TreeNode? contextNode = null)
+        /// <summary>
+        /// Computes the block name that will be used in the AutoCAD drawing for a given
+        /// asset, applying the component/assembly prefix rules.
+        /// </summary>
+        private string ComputeDesiredBlockName(AssetInfo ai, TreeNode? contextNode)
         {
-            if (ai == null || ai.FileDataBytes == null || ai.FileDataBytes.Length == 0)
-                throw new Exception("This DWG asset has no binary data (FileData).");
-
-            var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
-            var db = doc.Database;
-            var ed = doc.Editor;
-
-            // contextNode is resolved first so we can read the parent assembly name below.
-            if (contextNode == null)
-                contextNode = FindBlockNode(ai.BlockId) ?? treeGroups.SelectedNode;
-
-            // Build the block name to use in the drawing.
-            // All assets stored under an assembly block (both view assets in the "Views"
-            // folder AND plain assets sitting directly under the assembly node) are saved
-            // to the DB with only their bare stem name (e.g. "EL01.dwg", "test.dwg").
-            // When inserting we must qualify them with the parent assembly name so the
-            // block lands in the drawing as "Lagrand.Adorne.EL01" / "Lagrand.Adorne.test"
-            // rather than just "EL01" / "test". This prevents name collisions between
-            // assemblies and matches the expected IWC naming convention.
             string baseName = System.IO.Path.GetFileNameWithoutExtension(ai.FileName);
             if (string.IsNullOrWhiteSpace(baseName)) baseName = $"Asset_{ai.Id}";
 
-            // Locate the parent BlockTag by walking up from contextNode.
-            // For view-folder assets the walk goes: AssetNode → ViewsFolderNode → BlockNode.
-            // For direct assembly assets the walk goes: AssetNode → BlockNode (one step).
             string? assemblyName   = null;
             bool parentIsComponent = false;
             TreeNode? n = contextNode;
@@ -876,14 +858,24 @@ namespace IWCCadToolsV9.UI
                 n = n.Parent;
             }
 
-            // For simple components (exactly 1 DWG asset, IsComponent == true) the parent
-            // block name and the asset name are the same, so concatenating would produce the
-            // redundant "IWC_SYM.VIEW.IWC_SYM.VIEW" pattern.  Use just the asset name.
-            // For assemblies (multiple assets or explicitly flagged as assembly) prefix with
-            // the parent name: "AssemblyName.AssetName" (e.g. "Lagrand.Adorne.EL01").
-            string desiredName = (parentIsComponent || string.IsNullOrWhiteSpace(assemblyName))
+            return (parentIsComponent || string.IsNullOrWhiteSpace(assemblyName))
                 ? SanitizeBlockName(baseName)
                 : SanitizeBlockName($"{assemblyName}.{baseName}");
+        }
+
+        private void InsertDwgAsset(AssetInfo? ai, TreeNode? contextNode = null)
+        {
+            if (ai == null || ai.FileDataBytes == null || ai.FileDataBytes.Length == 0)
+                throw new Exception("This DWG asset has no binary data (FileData).");
+
+            var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+            var db = doc.Database;
+            var ed = doc.Editor;
+
+            if (contextNode == null)
+                contextNode = FindBlockNode(ai.BlockId) ?? treeGroups.SelectedNode;
+
+            string desiredName = ComputeDesiredBlockName(ai, contextNode);
 
             // Persist asset bytes to a temp DWG
             string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "IWCAssets");
@@ -1409,6 +1401,87 @@ namespace IWCCadToolsV9.UI
         //    return resultId;
         //}
 
+
+        // -----------------------------------------------------------------------
+        // Redefine — update an existing block definition without inserting
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Re-imports the DWG asset into the current drawing, replacing the existing
+        /// block definition and synchronising all existing block references.
+        /// If the block does not yet exist in the drawing, offers to insert it instead.
+        /// </summary>
+        private void RedefineBlockInDrawing(AssetInfo? ai, TreeNode? contextNode = null)
+        {
+            if (ai == null || ai.FileDataBytes == null || ai.FileDataBytes.Length == 0)
+                throw new Exception("This DWG asset has no binary data (FileData).");
+
+            var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+            var db  = doc.Database;
+            var ed  = doc.Editor;
+
+            if (contextNode == null)
+                contextNode = FindBlockNode(ai.BlockId) ?? treeGroups.SelectedNode;
+
+            string desiredName = ComputeDesiredBlockName(ai, contextNode);
+
+            // Check whether the block definition is already in the drawing
+            bool exists;
+            using (var chk = db.TransactionManager.StartTransaction())
+            {
+                var bt = (Autodesk.AutoCAD.DatabaseServices.BlockTable)
+                         chk.GetObject(db.BlockTableId, OpenMode.ForRead);
+                exists = bt.Has(desiredName);
+                chk.Commit();
+            }
+
+            if (!exists)
+            {
+                var answer = MessageBox.Show(
+                    $"Block '{desiredName}' hasn't been added to the current drawing yet.\n\n" +
+                    "Insert this as a new block instead?",
+                    "Block Not Found in Drawing",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1);
+
+                if (answer == DialogResult.Yes)
+                    InsertDwgAsset(ai, contextNode);
+
+                return;
+            }
+
+            // Write asset bytes to a temp DWG then reimport with Replace
+            string tempDir  = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "IWCAssets");
+            System.IO.Directory.CreateDirectory(tempDir);
+            string tempPath = System.IO.Path.Combine(tempDir, $"{desiredName}_{ai.Id}.dwg");
+            System.IO.File.WriteAllBytes(tempPath, ai.FileDataBytes);
+
+            try
+            {
+                using (doc.LockDocument())
+                {
+                    // Replace the existing definition with the latest from the DB
+                    ImportBlockDefinitionFromFile(db, tempPath, desiredName,
+                        Autodesk.AutoCAD.DatabaseServices.DuplicateRecordCloning.Replace);
+
+                    // Restore field expressions that WblockCloneObjects may strip
+                    AttributeFieldHelper.PatchFieldsFromSource(db, tempPath, desiredName);
+
+                    // Push the updated definition to every reference in the drawing
+                    int count = AttributeFieldHelper.ResyncAllBlockReferences(
+                        db, desiredName, removeOrphaned: false);
+
+                    ed.WriteMessage(
+                        $"\nIWC: Block '{desiredName}' redefined — " +
+                        $"{count} reference(s) synchronised.\n");
+                }
+            }
+            finally
+            {
+                try { System.IO.File.Delete(tempPath); } catch { }
+            }
+        }
 
         private void OpenNonDwgAsset(AssetInfo ai)
         {
@@ -2066,7 +2139,7 @@ namespace IWCCadToolsV9.UI
                 }
             }
 
-            // Insert (DWG only)
+            // Insert / Redefine (DWG only)
             if (canInsert)
             {
                 var miInsert = new ToolStripMenuItem("Insert");
@@ -2076,6 +2149,17 @@ namespace IWCCadToolsV9.UI
                     catch (Exception ex) { MessageBox.Show($"Insert failed: {ex.Message}", "Insert Asset", MessageBoxButtons.OK, MessageBoxIcon.Error); }
                 };
                 menu.Items.Add(miInsert);
+
+                var miRedefine = new ToolStripMenuItem("Redefine");
+                miRedefine.ToolTipText =
+                    "Replace the existing block definition in the drawing and update all references.\n" +
+                    "If the block hasn't been inserted yet you will be offered to insert it instead.";
+                miRedefine.Click += (s, e) =>
+                {
+                    try { RedefineBlockInDrawing(ai, node); }
+                    catch (Exception ex) { MessageBox.Show($"Redefine failed: {ex.Message}", "Redefine Block", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                };
+                menu.Items.Add(miRedefine);
                 menu.Items.Add(new ToolStripSeparator());
             }
 
