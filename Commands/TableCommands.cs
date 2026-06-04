@@ -23,6 +23,108 @@ namespace IWCCadToolsV9.Commands
     /// </summary>
     public static class TableCommands
     {
+        /// <summary>
+        /// Refreshes existing IWC material and hardware AutoCAD tables in the active drawing.
+        /// This is used by the drawing lifecycle startup path so users do not need to run
+        /// IWCUpdateMaterialTable or IWCUpdateHardwareTable manually after opening a linked DWG.
+        /// Only tables that have previously been inserted and stored through TableReferenceHelper
+        /// are updated; missing table references are ignored.
+        /// </summary>
+        public static void AutoUpdateExistingTablesInActiveDocument(bool quiet = true)
+        {
+            var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+
+            var ed = doc.Editor;
+            var db = doc.Database;
+
+            try
+            {
+                using (doc.LockDocument())
+                {
+                    bool anyUpdated = false;
+
+                    var materialTableId = TableReferenceHelper.RetrieveTableReference(db, TableReferenceHelper.MaterialTableKey);
+                    if (!materialTableId.IsNull)
+                    {
+                        string? dashId = AcadFilePropHelper.GetCustomProperty("IWC_SeriesID");
+                        if (!string.IsNullOrWhiteSpace(dashId))
+                        {
+                            var data = QueryMaterialTable(dashId);
+                            if (data != null)
+                            {
+                                anyUpdated |= TryUpdateAcadTable(db, materialTableId, data, AcadTableHelper.MaterialCols, "material", ed, quiet);
+                            }
+                        }
+                    }
+
+                    var hardwareTableId = TableReferenceHelper.RetrieveTableReference(db, TableReferenceHelper.HardwareTableKey);
+                    if (!hardwareTableId.IsNull)
+                    {
+                        string? dash = ResolveDashFromPropertiesNoPrompt();
+                        if (!string.IsNullOrWhiteSpace(dash))
+                        {
+                            var data = QueryHardwareTable(dash);
+                            if (data != null)
+                            {
+                                anyUpdated |= TryUpdateAcadTable(db, hardwareTableId, data, AcadTableHelper.HardwareCols, "hardware", ed, quiet);
+                            }
+                        }
+                    }
+
+                    if (anyUpdated && !quiet)
+                        ed.WriteMessage("\nIWC drawing tables updated.\n");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                if (!quiet)
+                    ed.WriteMessage($"\nIWC automatic table update failed — {ex.Message}\n");
+                else
+                    ed.WriteMessage($"\nIWC automatic table update failed — {ex.Message}\n");
+            }
+        }
+
+        private static bool TryUpdateAcadTable(Database db, ObjectId tableId, DataTable data, AcadTableHelper.ColumnSpec[] columns, string tableName, Editor ed, bool quiet)
+        {
+            if (data.Rows.Count == 0)
+            {
+                if (!quiet) ed.WriteMessage($"\nNo {tableName} data found for this dash.\n");
+                return false;
+            }
+
+            using var tr = db.TransactionManager.StartTransaction();
+            var acadTable = tr.GetObject(tableId, OpenMode.ForWrite, false) as Table;
+            if (acadTable == null)
+            {
+                if (!quiet) ed.WriteMessage($"\nStored {tableName} table reference was not found.\n");
+                return false;
+            }
+
+            AcadTableHelper.UpdateTable(acadTable, data, columns);
+            tr.Commit();
+
+            if (!quiet) ed.WriteMessage($"\n{System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(tableName)} table updated.\n");
+            return true;
+        }
+
+        private static string? ResolveDashFromPropertiesNoPrompt()
+        {
+            string? projNum = AcadFilePropHelper.GetCustomProperty("IWC_ProjNo");
+            string? seriesNo = AcadFilePropHelper.GetCustomProperty("IWC_SeriesNo");
+
+            if (string.IsNullOrWhiteSpace(projNum) || string.IsNullOrWhiteSpace(seriesNo))
+                return null;
+
+            projNum = projNum.Trim();
+            seriesNo = seriesNo.Trim();
+            if (seriesNo.Length < 4)
+                seriesNo = seriesNo.PadLeft(4, '0');
+
+            var dash = $"{projNum}-{seriesNo}";
+            return dash.Length == 9 ? dash : null;
+        }
+
         // =========================================================================
         // HARDWARE TABLE
         // =========================================================================

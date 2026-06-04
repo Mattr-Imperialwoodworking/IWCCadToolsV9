@@ -2,6 +2,7 @@ using System;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using IWCCadToolsV9.Helpers;
+using IWCCadToolsV9.Commands;
 using Application = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace IWCCadToolsV9.Core
@@ -48,6 +49,48 @@ namespace IWCCadToolsV9.Core
             _registered = false;
         }
 
+
+        // -----------------------------------------------------------------------
+        // Active-document bootstrap — used when the add-in/palette is loaded
+        // after a drawing is already open. DocumentCreated will not fire for
+        // that already-open drawing, so this checks the current DWG properties
+        // and loads project context only when the file is already linked.
+        // It intentionally does not prompt for a project/dash.
+        // -----------------------------------------------------------------------
+
+        public static void InitializeActiveDocumentIfLinked()
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+
+            _ = InitializeDocumentIfLinkedAsync(doc);
+        }
+
+        private static async System.Threading.Tasks.Task InitializeDocumentIfLinkedAsync(Document doc)
+        {
+            try
+            {
+                string? idStr = AcadFilePropHelper.GetCustomProperty("IWC_ID");
+                if (!int.TryParse(idStr, out int projId) || projId <= 0)
+                    return;
+
+                var svc = ProjectContextService.GetOrCreate(doc);
+                DwgPropertyStore.EnsureAllKeysExist(doc);
+                WireBeforeSaveOnce(doc, svc);
+                AutoUpdateExistingTablesOnce(doc);
+
+                if (svc.HasProject)
+                    svc.RaiseProjectLoaded();
+                else
+                    await svc.LoadAsync().ConfigureAwait(false);
+            }
+            catch (System.Exception ex)
+            {
+                Application.DocumentManager.MdiActiveDocument?.Editor
+                    .WriteMessage($"\nIWC: Active drawing project check failed — {ex.Message}\n");
+            }
+        }
+
         // -----------------------------------------------------------------------
         // DocumentCreated — fires for both new drawings and opened DWG files.
         // DocumentCollection does not expose a separate DocumentOpened event;
@@ -69,11 +112,14 @@ namespace IWCCadToolsV9.Core
                 var svc = ProjectContextService.GetOrCreate(doc);
 
                 DwgPropertyStore.EnsureAllKeysExist(doc);
-                WireBeforeSave(doc, svc);
+                WireBeforeSaveOnce(doc, svc);
 
                 // LoadAsync does SQL I/O — run on background thread, then return
                 // to the AutoCAD main thread before showing any modal dialogs.
                 await svc.LoadAsync().ConfigureAwait(false);
+
+                Application.DocumentManager.ExecuteInApplicationContext(
+                    state => AutoUpdateExistingTablesOnce((Document)state!), doc);
 
                 // PromptForProject / PromptForDash call ShowModalDialog which must
                 // be invoked on the main AutoCAD thread. ExecuteInApplicationContext
@@ -110,6 +156,8 @@ namespace IWCCadToolsV9.Core
                 if (e.Document == null) return;
                 var svc = ProjectContextService.GetOrCreate(e.Document);
 
+                AutoUpdateExistingTablesOnce(e.Document);
+
                 // Re-raise so subscribed UI controls refresh without a DB round-trip
                 // The data is already loaded from when this document was opened/created.
                 if (svc.HasProject)
@@ -119,18 +167,57 @@ namespace IWCCadToolsV9.Core
         }
 
         // -----------------------------------------------------------------------
+        // Automatic table refresh — only refreshes drawings that already contain
+        // stored IWC material/hardware table references. This keeps existing
+        // IWCUpdateMaterialTable / IWCUpdateHardwareTable command behavior intact
+        // while allowing opened drawings to update automatically.
+        // -----------------------------------------------------------------------
+
+        private const string AutoTablesUpdatedKey = "IWC_AutoTablesUpdatedOnOpen_v1";
+
+        private static void AutoUpdateExistingTablesOnce(Document doc)
+        {
+            // TableCommands and AcadFilePropHelper operate on MdiActiveDocument.
+            // If this lifecycle event is for a background/non-active document, wait
+            // until DocumentActivated so the correct drawing is active before updating.
+            if (!object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, doc))
+                return;
+
+            if (doc.UserData[AutoTablesUpdatedKey] is bool updated && updated)
+                return;
+
+            doc.UserData[AutoTablesUpdatedKey] = true;
+
+            try
+            {
+                TableCommands.AutoUpdateExistingTablesInActiveDocument(quiet: true);
+            }
+            catch (System.Exception ex)
+            {
+                doc.Editor.WriteMessage($"\nIWC: Automatic material/hardware table refresh failed — {ex.Message}\n");
+            }
+        }
+
+        // -----------------------------------------------------------------------
         // BeforeSave — wire per-document (called from Created and Opened)
         // -----------------------------------------------------------------------
 
-        private static void WireBeforeSave(Document doc, ProjectContextService svc)
+        private const string BeforeSaveWireKey = "IWC_BeforeSaveWired_v1";
+
+        private static void WireBeforeSaveOnce(Document doc, ProjectContextService svc)
         {
             // Database.BeginSave fires before the DWG bytes are written to disk,
             // ensuring the custom properties in the saved file are always current.
+            if (doc.UserData[BeforeSaveWireKey] is bool wired && wired)
+                return;
+
             doc.Database.BeginSave += (s, e) =>
             {
                 try { svc.PersistToDwg(); }
                 catch { /* non-fatal — don't block the save */ }
             };
+
+            doc.UserData[BeforeSaveWireKey] = true;
         }
     }
 

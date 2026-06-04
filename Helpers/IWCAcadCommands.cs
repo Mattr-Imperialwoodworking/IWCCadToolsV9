@@ -7,6 +7,7 @@ using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.Windows;
 using IWCCadToolsV9.UI;
+using IWCCadToolsV9.Core;
 using Application = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace IWCCadToolsV9.Helpers
@@ -60,6 +61,12 @@ namespace IWCCadToolsV9.Helpers
             }
 
             _paletteSet.Visible = true;
+
+            // If the palette is launched after a DWG is already open, DocumentCreated
+            // will not fire for that drawing. Check the active drawing immediately;
+            // if it already has IWC custom project properties, load that context and
+            // notify the palette controls without prompting for a new project.
+            DrawingLifecycleHandler.InitializeActiveDocumentIfLinked();
 
             // Size only on first show — after that, respect what the user set.
             // Must run after Visible = true so the HWND exists.

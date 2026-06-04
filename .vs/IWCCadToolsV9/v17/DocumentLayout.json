@@ -3,28 +3,8 @@
   "WorkspaceRootPath": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\ui\\ctliwcproj.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\ctliwcproj.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\ui\\ctliwcblockbrowserv2.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\ctliwcblockbrowserv2.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\acadnetautoload.scr||{8B382828-6202-11D1-8870-0000F87579D2}",
-      "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:acadnetautoload.scr||{8B382828-6202-11D1-8870-0000F87579D2}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\helpers\\blocklibraryhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:helpers\\blocklibraryhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\ui\\ctliwcprojnav.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\ctliwcprojnav.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\ui\\ctliwcprojnav.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
-      "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\ctliwcprojnav.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
     },
     {
       "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\commands\\tablecommands.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -67,55 +47,19 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "CtlIWCProj.cs",
-              "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\CtlIWCProj.cs",
-              "RelativeDocumentMoniker": "UI\\CtlIWCProj.cs",
-              "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\CtlIWCProj.cs",
-              "RelativeToolTip": "UI\\CtlIWCProj.cs",
-              "ViewState": "AgIAAJgBAAAAAAAAAAAAAKQBAAA/AAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-04T14:23:03.767Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "ctlIWCBlockBrowserV2.cs",
-              "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\ctlIWCBlockBrowserV2.cs",
-              "RelativeDocumentMoniker": "UI\\ctlIWCBlockBrowserV2.cs",
-              "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\ctlIWCBlockBrowserV2.cs",
-              "RelativeToolTip": "UI\\ctlIWCBlockBrowserV2.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAoAAAAcAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-02T20:58:23.518Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "AcadNetAutoLoad.scr",
-              "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\AcadNetAutoLoad.scr",
-              "RelativeDocumentMoniker": "AcadNetAutoLoad.scr",
-              "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\AcadNetAutoLoad.scr",
-              "RelativeToolTip": "AcadNetAutoLoad.scr",
-              "ViewState": "AgIAAAQAAAAAAAAAAAAAAAYAAAANAAAAAAAAAA==",
-              "Icon": "00000000-0000-0000-0000-000000000000.000000|iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAFzSURBVDhPpZAxSAJhFMf/3xl0Ipo4ReJgOJRScEtYYEIRFw2BWQQpLdoWhNlgQWmzFQRRiy5RLVJCQyFBoEvh0mCBkOAgkjTIccu5fQ3m4R1BHf3gwcf/vffj4xFCCOEnPMvuBnPWqn\u002Ba8QutyaGL44fsKqWUglJK4tzse29TGpxenGdGd9fU8wr2\u002B92ASkJirJNGTpMwmIww\u002BD3qHQXbepf87kgYAND16Lrn/gRbKAc3ZnznjLqhBbZQDmoSxBvPigIATQK2z6goaBX8BImxThrYiaBwe4/aa1nd/xUSY51UHWpBFujNJoTuUrByLhTTGUiCCG80BEkQkRzmsffxBACov7whPReGJIhA9w0sdhusnAuVx/agNxrCVWAT\u002BYMULHYbACC7noCVc2HEz3fWlEcs3eQgCSLGQkvdsYzvJAFJEFG6zsmZLGhWa237Ao9iOoP8YRorl0fwboXRrNaA7x8AgGNqXBb8\u002B4iMzjFQUYda\u002BAIuf4GHKtS5mgAAAABJRU5ErkJggg==",
-              "WhenOpened": "2026-06-02T20:58:19.189Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 3,
               "Title": "BlockLibraryHelper.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\Helpers\\BlockLibraryHelper.cs",
               "RelativeDocumentMoniker": "Helpers\\BlockLibraryHelper.cs",
               "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\Helpers\\BlockLibraryHelper.cs",
               "RelativeToolTip": "Helpers\\BlockLibraryHelper.cs",
-              "ViewState": "AgIAAO8AAAAAAAAAAAAWwOgAAAA/AAAAAAAAAA==",
+              "ViewState": "AgIAAO8AAAAAAAAAAAAWwP0AAAARAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-02T13:38:40.496Z"
+              "WhenOpened": "2026-06-02T13:38:40.496Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 1,
               "Title": "TableCommands.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\Commands\\TableCommands.cs",
               "RelativeDocumentMoniker": "Commands\\TableCommands.cs",
@@ -124,30 +68,6 @@
               "ViewState": "AgIAAAMAAAAAAAAAAAAAAA0AAAAgAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-06-01T22:51:40.578Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 4,
-              "Title": "ctlIWCProjNav.cs",
-              "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\ctlIWCProjNav.cs",
-              "RelativeDocumentMoniker": "UI\\ctlIWCProjNav.cs",
-              "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\ctlIWCProjNav.cs",
-              "RelativeToolTip": "UI\\ctlIWCProjNav.cs",
-              "ViewState": "AgIAAO4GAAAAAAAAAAD4v+8GAAA8AAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-01T22:14:01.44Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 5,
-              "Title": "ctlIWCProjNav.cs [Design]",
-              "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\ctlIWCProjNav.cs",
-              "RelativeDocumentMoniker": "UI\\ctlIWCProjNav.cs",
-              "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\ctlIWCProjNav.cs [Design]",
-              "RelativeToolTip": "UI\\ctlIWCProjNav.cs [Design]",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-01T22:13:47.954Z"
             }
           ]
         }

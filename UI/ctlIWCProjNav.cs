@@ -34,17 +34,25 @@ namespace IWCCadToolsV9.UI
         private ContextMenuStrip? _dashFolderMenu;
         private ToolStripMenuItem? _miDashFolderRefresh;
 
+        // Project/root child-node context menus
+        private ContextMenuStrip  _projectNodeMenu       = new ContextMenuStrip();
+        private ToolStripMenuItem _miProjectNodeRefresh  = new ToolStripMenuItem("Refresh Data");
+        private ContextMenuStrip  _childNodeMenu         = new ContextMenuStrip();
+        private ToolStripMenuItem _miChildNodeRefresh    = new ToolStripMenuItem("Refresh Data");
+
         // Material context menu
         private ContextMenuStrip  _matMenu               = new ContextMenuStrip();
         private ToolStripMenuItem _miAddMaterial          = new ToolStripMenuItem("Add New Material");
         private ToolStripMenuItem _miEditMaterial         = new ToolStripMenuItem("Edit Material");
         private ToolStripMenuItem _miAssociateToDash      = new ToolStripMenuItem("Associate to Current Dash");
+        private ToolStripMenuItem _miRefreshMaterials     = new ToolStripMenuItem("Refresh Data");
 
         // Hardware context menu
         private ContextMenuStrip  _hdwMenu               = new ContextMenuStrip();
         private ToolStripMenuItem _miAddHardware          = new ToolStripMenuItem("Add New Hardware");
         private ToolStripMenuItem _miEditHardware         = new ToolStripMenuItem("Edit Hardware");
         private ToolStripMenuItem _miAssociateHdwToDash   = new ToolStripMenuItem("Associate to Current Dash");
+        private ToolStripMenuItem _miRefreshHardware      = new ToolStripMenuItem("Refresh Data");
 
         // Data binding
         private readonly BindingSource _gridBinding = new BindingSource();
@@ -94,9 +102,10 @@ namespace IWCCadToolsV9.UI
 
             SetupIcons();
             ConfigureTreeEvents();
+            InitChildNodeContextMenu();
             InitMaterialContextMenu();
             InitHardwareContextMenu();
-            //InitDashFolderContextMenu();
+            InitDashFolderContextMenu();
 
             // Subscribe to document switches so the tree refreshes on each drawing
             Application.DocumentManager.DocumentActivated += OnNavDocumentActivated;
@@ -155,6 +164,116 @@ namespace IWCCadToolsV9.UI
             tree.EndUpdate();
         }
 
+        #region Project Child Node Context Menu
+
+        private void InitChildNodeContextMenu()
+        {
+            _miProjectNodeRefresh.Click += (_, _) => RefreshSelectedProjectNode();
+            _projectNodeMenu.Items.Add(_miProjectNodeRefresh);
+
+            _miChildNodeRefresh.Click += (_, _) => RefreshSelectedProjectChildNode();
+            _childNodeMenu.Items.Add(_miChildNodeRefresh);
+        }
+
+        private void InitDashFolderContextMenu()
+        {
+            _dashFolderMenu = new ContextMenuStrip();
+            _miDashFolderRefresh = new ToolStripMenuItem("Refresh Data");
+            _miDashFolderRefresh.Click += (_, _) =>
+            {
+                if (tree.SelectedNode?.Tag is DashSectionTag st)
+                    ReloadDashFolder(tree.SelectedNode, st);
+            };
+            _dashFolderMenu.Items.Add(_miDashFolderRefresh);
+        }
+
+        private void RefreshSelectedProjectNode()
+        {
+            if (tree.SelectedNode?.Tag is ProjectTag pt)
+                ReloadForProject(pt.ProjectId, pt.ProjectNum.ToString(), pt.ProjectName ?? string.Empty);
+            else
+                ReloadFromContext();
+        }
+
+        private void RefreshSelectedProjectChildNode()
+        {
+            if (tree.SelectedNode == null) return;
+            RefreshProjectChildNode(tree.SelectedNode);
+        }
+
+        private void RefreshNearestProjectChildNode(string childLabelContains)
+        {
+            TreeNode? node = tree.SelectedNode;
+            while (node != null)
+            {
+                if (node.Tag is ChildTag ct &&
+                    ct.ChildLabel?.Contains(childLabelContains, StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    RefreshProjectChildNode(node);
+                    return;
+                }
+                node = node.Parent;
+            }
+        }
+
+        private void RefreshProjectChildNode(TreeNode node)
+        {
+            if (node?.Tag is not ChildTag ct) return;
+
+            tree.BeginUpdate();
+            try
+            {
+                node.Nodes.Clear();
+
+                if (ct.ChildLabel.Equals("Dash List", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadDashesForProject(node, ct.ProjectId);
+                }
+                else if (ct.ChildLabel.Equals("Project Material List", StringComparison.OrdinalIgnoreCase)
+                      || ct.ChildLabel.Equals("Project Materials List", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadMaterialsForProject(node, ct.ProjectId);
+                }
+                else if (ct.ChildLabel.Equals("Project Hardware List", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadHardwareForProject(node, ct.ProjectId);
+                }
+                else if (ct.ChildLabel.Equals("Shop Orders List", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadShopOrdersForProject(node, ct.ProjectId);
+                }
+                else
+                {
+                    node.Nodes.Add(new TreeNode("(refresh loader not implemented yet)")
+                    {
+                        ImageKey = IconKeyDataTable,
+                        SelectedImageKey = IconKeyDataTable
+                    });
+                }
+
+                node.Expand();
+                UpdateGrid(CreateEmptyTable($"{ct.ChildLabel} refreshed."), "Info");
+            }
+            catch (Exception ex)
+            {
+                node.Nodes.Clear();
+                node.Nodes.Add(new TreeNode($"(refresh failed: {ex.Message})")
+                {
+                    ImageKey = IconKeyDataTable,
+                    SelectedImageKey = IconKeyDataTable
+                });
+
+                MessageBox.Show($"Failed to refresh {ct.ChildLabel}:\n{ex.Message}",
+                    "Project Navigator", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                tree.EndUpdate();
+            }
+        }
+
+        #endregion
+
         #region Material Context Menu
 
         private void InitMaterialContextMenu()
@@ -162,6 +281,9 @@ namespace IWCCadToolsV9.UI
             _miAddMaterial.Click     += (_, _) => OnAddMaterial();
             _miEditMaterial.Click    += (_, _) => OnEditMaterial();
             _miAssociateToDash.Click += (_, _) => OnAssociateToDash();
+            _miRefreshMaterials.Click += (_, _) => RefreshNearestProjectChildNode("Material");
+            _matMenu.Items.Add(_miRefreshMaterials);
+            _matMenu.Items.Add(new ToolStripSeparator());
             _matMenu.Items.Add(_miAddMaterial);
             _matMenu.Items.Add(_miEditMaterial);
             _matMenu.Items.Add(new ToolStripSeparator());
@@ -210,6 +332,18 @@ namespace IWCCadToolsV9.UI
                 _miAssociateHdwToDash.Enabled   = hasActiveDash;
                 _miAssociateHdwToDash.Text      = dashLabel;
                 _hdwMenu.Show(tree, location);
+            }
+            else if (node.Tag is DashSectionTag && _dashFolderMenu != null)
+            {
+                _dashFolderMenu.Show(tree, location);
+            }
+            else if (node.Tag is ProjectTag)
+            {
+                _projectNodeMenu.Show(tree, location);
+            }
+            else if (node.Tag is ChildTag)
+            {
+                _childNodeMenu.Show(tree, location);
             }
         }
 
@@ -433,6 +567,9 @@ namespace IWCCadToolsV9.UI
             _miAddHardware.Click        += (_, _) => OnAddHardware();
             _miEditHardware.Click       += (_, _) => OnEditHardware();
             _miAssociateHdwToDash.Click += (_, _) => OnAssociateHdwToDash();
+            _miRefreshHardware.Click += (_, _) => RefreshNearestProjectChildNode("Hardware");
+            _hdwMenu.Items.Add(_miRefreshHardware);
+            _hdwMenu.Items.Add(new ToolStripSeparator());
             _hdwMenu.Items.Add(_miAddHardware);
             _hdwMenu.Items.Add(_miEditHardware);
             _hdwMenu.Items.Add(new ToolStripSeparator());
