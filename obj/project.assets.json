@@ -2372,11 +2372,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\mattr\\source\\repos\\IWCCadToolsV9\\IWCCadToolsV9\\IWCCadToolsV9.csproj",
+      "projectUniqueName": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\IWCCadToolsV9.csproj",
       "projectName": "IWCCadToolsV9",
-      "projectPath": "C:\\Users\\mattr\\source\\repos\\IWCCadToolsV9\\IWCCadToolsV9\\IWCCadToolsV9.csproj",
+      "projectPath": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\IWCCadToolsV9.csproj",
       "packagesPath": "C:\\Users\\mattr\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\mattr\\source\\repos\\IWCCadToolsV9\\IWCCadToolsV9\\obj\\",
+      "outputPath": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

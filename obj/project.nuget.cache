@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "OzWuoiuLaos=",
+  "dgSpecHash": "anHRY1Vv+sQ=",
   "success": true,
-  "projectFilePath": "C:\\Users\\mattr\\source\\repos\\IWCCadToolsV9\\IWCCadToolsV9\\IWCCadToolsV9.csproj",
+  "projectFilePath": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\IWCCadToolsV9.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\mattr\\.nuget\\packages\\azure.core\\1.44.1\\azure.core.1.44.1.nupkg.sha512",
     "C:\\Users\\mattr\\.nuget\\packages\\azure.identity\\1.13.2\\azure.identity.1.13.2.nupkg.sha512",

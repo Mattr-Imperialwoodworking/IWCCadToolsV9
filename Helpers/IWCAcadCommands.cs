@@ -42,6 +42,11 @@ namespace IWCCadToolsV9.Helpers
                           | PaletteSetStyles.ShowCloseButton
                           | PaletteSetStyles.ShowPropertiesMenu,
                 };
+                // Allow WinForms text editors inside the palette to retain keyboard focus.
+                // Without this, AutoCAD can immediately return focus to the drawing editor,
+                // making palette TextBox controls appear non-editable.
+                _paletteSet.KeepFocus = true;
+
                 try { _paletteSet.Icon = Properties.Resources.IWCStamp; }
                 catch { /* icon unavailable — continue */ }
 

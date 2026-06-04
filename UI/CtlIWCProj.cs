@@ -22,6 +22,12 @@ namespace IWCCadToolsV9.UI
 
         public CtlIWCProj()
         {
+            // AutoCAD palettes can be aggressive about returning focus to the
+            // drawing editor.  Make the user control itself selectable so its
+            // child TextBox/DataGridView editors can keep focus while typing.
+            SetStyle(ControlStyles.Selectable, true);
+            TabStop = true;
+
             InitializeComponent();
             tabControl.Dock = DockStyle.Fill;
             Dock            = DockStyle.Fill;
@@ -44,6 +50,8 @@ namespace IWCCadToolsV9.UI
         // -----------------------------------------------------------------------
 
         private ProjectContextService? _currentSvc;
+        private bool _loadingFileProps;
+        private bool _filePropsDirty;
 
         private void SubscribeToContext(ProjectContextService svc)
         {
@@ -129,56 +137,52 @@ namespace IWCCadToolsV9.UI
 
         private void LoadFileProps()
         {
-            // ── Custom Properties grid ────────────────────────────────────
-            dgvCustomProps.Rows.Clear();
-            var all = Helpers.AcadFilePropHelper.GetAllCustomProperties();
-            foreach (var kv in all)
-                dgvCustomProps.Rows.Add(kv.Key, kv.Value);
+            _loadingFileProps = true;
 
-            // ── Summary tab ───────────────────────────────────────────────
-            var summ = Helpers.AcadFilePropHelper.GetSummaryProps();
-            if (summ != null)
+            try
             {
-                txtSummTitle.Text     = summ.Title;
-                txtSummSubject.Text   = summ.Subject;
-                txtSummAuthor.Text    = summ.Author;
-                txtSummKeywords.Text  = summ.Keywords;
-                txtSummHyperlink.Text = summ.HyperlinkBase;
-                txtSummRevision.Text  = summ.RevisionNumber;
-                txtSummComments.Text  = summ.Comments;
+                // ── Custom Properties grid ────────────────────────────────────
+                dgvCustomProps.Rows.Clear();
+                var all = Helpers.AcadFilePropHelper.GetAllCustomProperties();
+                foreach (var kv in all)
+                    dgvCustomProps.Rows.Add(kv.Key, kv.Value);
+
+                // ── Summary tab ───────────────────────────────────────────────
+                var summ = Helpers.AcadFilePropHelper.GetSummaryProps();
+                if (summ != null)
+                {
+                    txtSummTitle.Text     = summ.Title;
+                    txtSummSubject.Text   = summ.Subject;
+                    txtSummAuthor.Text    = summ.Author;
+                    txtSummKeywords.Text  = summ.Keywords;
+                    txtSummHyperlink.Text = summ.HyperlinkBase;
+                    txtSummRevision.Text  = summ.RevisionNumber;
+                    txtSummComments.Text  = summ.Comments;
+                }
+
+                // ── File Info tab ─────────────────────────────────────────────
+                var info = Helpers.AcadFilePropHelper.GetFileInfoProps();
+                if (info != null)
+                {
+                    txtInfoFile.Text      = info.FileName     ?? string.Empty;
+                    txtInfoLocation.Text  = info.Location     ?? string.Empty;
+                    txtInfoSize.Text      = info.SizeBytes > 0
+                        ? $"{info.SizeBytes / 1024.0 / 1024.0:F2} MB ({info.SizeBytes:N0} bytes)"
+                        : string.Empty;
+                    txtInfoCreated.Text   = info.Created?.ToString("g")  ?? string.Empty;
+                    txtInfoModified.Text  = info.Modified?.ToString("g") ?? string.Empty;
+                    txtInfoAccessed.Text  = info.Accessed?.ToString("g") ?? string.Empty;
+                    txtInfoLastSaved.Text = info.LastSavedBy ?? string.Empty;
+                }
             }
-
-            // ── File Info tab ─────────────────────────────────────────────
-            var info = Helpers.AcadFilePropHelper.GetFileInfoProps();
-            if (info != null)
+            finally
             {
-                txtInfoFile.Text      = info.FileName     ?? string.Empty;
-                txtInfoLocation.Text  = info.Location     ?? string.Empty;
-                txtInfoSize.Text      = info.SizeBytes > 0
-                    ? $"{info.SizeBytes / 1024.0 / 1024.0:F2} MB ({info.SizeBytes:N0} bytes)"
-                    : string.Empty;
-                txtInfoCreated.Text   = info.Created?.ToString("g")  ?? string.Empty;
-                txtInfoModified.Text  = info.Modified?.ToString("g") ?? string.Empty;
-                txtInfoAccessed.Text  = info.Accessed?.ToString("g") ?? string.Empty;
-                txtInfoLastSaved.Text = info.LastSavedBy ?? string.Empty;
+                _loadingFileProps = false;
+                SetFilePropsDirty(false);
             }
         }
 
-        private void BtnApplySummary_Click(object? sender, EventArgs e)
-        {
-            Helpers.AcadFilePropHelper.SetSummaryProps(new Helpers.AcadFilePropHelper.SummaryProps
-            {
-                Title         = txtSummTitle.Text.Trim(),
-                Subject       = txtSummSubject.Text.Trim(),
-                Author        = txtSummAuthor.Text.Trim(),
-                Keywords      = txtSummKeywords.Text.Trim(),
-                HyperlinkBase = txtSummHyperlink.Text.Trim(),
-                Comments      = txtSummComments.Text,
-            });
-            LoadFileProps();
-        }
-
-        private static TextBox AddFilePropRow(TableLayoutPanel tbl, int row, string label)
+        private static TextBox AddFilePropRow(TableLayoutPanel tbl, int row, string label, bool readOnly = true)
         {
             tbl.Controls.Add(new Label
             {
@@ -188,11 +192,92 @@ namespace IWCCadToolsV9.UI
             }, 0, row);
             var tb = new TextBox
             {
-                Dock = DockStyle.Fill, ReadOnly = true,
+                Dock = DockStyle.Fill,
+                ReadOnly = readOnly,
+                Enabled = true,
+                TabStop = !readOnly,
                 BackColor = System.Drawing.SystemColors.Window
             };
+            if (!readOnly)
+            {
+                tb.Cursor = Cursors.IBeam;
+                tb.MouseDown += EditableFilePropControl_MouseDown;
+                tb.Enter += EditableFilePropControl_Enter;
+            }
             tbl.Controls.Add(tb, 1, row);
             return tb;
+        }
+
+        private static void EditableFilePropControl_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (sender is Control ctl && ctl.CanFocus && !ctl.Focused)
+                ctl.Focus();
+        }
+
+        private static void EditableFilePropControl_Enter(object? sender, EventArgs e)
+        {
+            if (sender is TextBox tb && !tb.ReadOnly)
+                tb.SelectionStart = tb.TextLength;
+        }
+
+        private void MarkFilePropsDirty(object? sender, EventArgs e)
+        {
+            if (!_loadingFileProps)
+                SetFilePropsDirty(true);
+        }
+
+        private void SetFilePropsDirty(bool dirty)
+        {
+            _filePropsDirty = dirty;
+            if (btnSaveFileProps != null)
+            {
+                btnSaveFileProps.Visible = dirty;
+                btnSaveFileProps.Enabled = dirty;
+            }
+        }
+
+        private void SaveFileProps()
+        {
+            if (!_filePropsDirty) return;
+
+            try
+            {
+                var customProps = new System.Collections.Generic.Dictionary<string, string>(
+                    System.StringComparer.OrdinalIgnoreCase);
+
+                foreach (DataGridViewRow row in dgvCustomProps.Rows)
+                {
+                    if (row.IsNewRow) continue;
+
+                    var key = row.Cells["PropName"].Value?.ToString()?.Trim() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(key)) continue;
+
+                    customProps[key] = row.Cells["PropValue"].Value?.ToString() ?? string.Empty;
+                }
+
+                Helpers.AcadFilePropHelper.SetCustomProperties(customProps);
+
+                Helpers.AcadFilePropHelper.SetSummaryProps(new Helpers.AcadFilePropHelper.SummaryProps
+                {
+                    Title          = txtSummTitle.Text,
+                    Subject        = txtSummSubject.Text,
+                    Author         = txtSummAuthor.Text,
+                    Keywords       = txtSummKeywords.Text,
+                    HyperlinkBase  = txtSummHyperlink.Text,
+                    RevisionNumber = txtSummRevision.Text,
+                    Comments       = txtSummComments.Text
+                });
+
+                LoadFileProps();
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show(
+                    $"Unable to save drawing file properties.\n\n{ex.Message}",
+                    "IWC File Properties",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private void ClearProjectFields()
@@ -215,14 +300,8 @@ namespace IWCCadToolsV9.UI
             ProjectContextService.GetOrCreate(doc).ChangeProject();
         }
 
-        private void btnSyncTitleblock_Click(object? sender, EventArgs e)
-        {
-            // Force a full write of current context back to DWG properties
-            var doc = Application.DocumentManager.MdiActiveDocument;
-            if (doc == null) return;
-            ProjectContextService.GetOrCreate(doc).PersistToDwg();
-            LoadFileProps();
-        }
+        private void btnSaveFileProps_Click(object? sender, EventArgs e)
+            => SaveFileProps();
 
         // -----------------------------------------------------------------------
         // Designer-generated members (unchanged from original)
@@ -285,9 +364,10 @@ namespace IWCCadToolsV9.UI
             var subCustom = new TabPage("Custom Properties");
             dgvCustomProps = new DataGridView
             {
-                Dock = DockStyle.Fill, ReadOnly = true,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false, AllowUserToAddRows = false,
+                Dock = DockStyle.Fill, ReadOnly = false, Enabled = true, TabStop = true,
+                EditMode = DataGridViewEditMode.EditOnEnter,
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                MultiSelect = false, AllowUserToAddRows = true,
                 AllowUserToDeleteRows = false, RowHeadersVisible = false,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -297,18 +377,13 @@ namespace IWCCadToolsV9.UI
             dgvCustomProps.Columns.Add("PropValue", "Value");
             dgvCustomProps.Columns["PropName"].FillWeight  = 40;
             dgvCustomProps.Columns["PropValue"].FillWeight = 60;
+            dgvCustomProps.CellValueChanged += MarkFilePropsDirty;
+            dgvCustomProps.CellEndEdit      += MarkFilePropsDirty;
+            dgvCustomProps.RowsAdded        += MarkFilePropsDirty;
+            dgvCustomProps.MouseDown       += EditableFilePropControl_MouseDown;
+            dgvCustomProps.Enter           += EditableFilePropControl_Enter;
 
-            var btnSyncRow = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Bottom, Height = 36,
-                FlowDirection = FlowDirection.RightToLeft,
-                Padding = new Padding(4, 4, 4, 4)
-            };
-            btnSyncTitleblock = new Button { Text = "Sync Title Block", Width = 140, Height = 28 };
-            btnSyncTitleblock.Click += btnSyncTitleblock_Click;
-            btnSyncRow.Controls.Add(btnSyncTitleblock);
             subCustom.Controls.Add(dgvCustomProps);
-            subCustom.Controls.Add(btnSyncRow);
 
             // ── Sub-tab B: Summary ────────────────────────────────────────
             var subSummary = new TabPage("Summary");
@@ -323,33 +398,35 @@ namespace IWCCadToolsV9.UI
                 tblSumm.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             tblSumm.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Comments
 
-            txtSummTitle      = AddFilePropRow(tblSumm, 0, "Title:");
-            txtSummSubject    = AddFilePropRow(tblSumm, 1, "Subject:");
-            txtSummAuthor     = AddFilePropRow(tblSumm, 2, "Author:");
-            txtSummKeywords   = AddFilePropRow(tblSumm, 3, "Keywords:");
-            txtSummHyperlink  = AddFilePropRow(tblSumm, 4, "Hyperlink:");
-            txtSummRevision   = AddFilePropRow(tblSumm, 5, "Revision:");
+            txtSummTitle      = AddFilePropRow(tblSumm, 0, "Title:", readOnly: false);
+            txtSummSubject    = AddFilePropRow(tblSumm, 1, "Subject:", readOnly: false);
+            txtSummAuthor     = AddFilePropRow(tblSumm, 2, "Author:", readOnly: false);
+            txtSummKeywords   = AddFilePropRow(tblSumm, 3, "Keywords:", readOnly: false);
+            txtSummHyperlink  = AddFilePropRow(tblSumm, 4, "Hyperlink:", readOnly: false);
+            txtSummRevision   = AddFilePropRow(tblSumm, 5, "Revision:", readOnly: false);
             txtSummComments   = new TextBox
             {
                 Dock = DockStyle.Fill, Multiline = true, ReadOnly = false,
-                BackColor = System.Drawing.SystemColors.Window, ScrollBars = ScrollBars.Vertical
+                Enabled = true, TabStop = true,
+                BackColor = System.Drawing.SystemColors.Window, ScrollBars = ScrollBars.Vertical,
+                Cursor = Cursors.IBeam
             };
+            txtSummComments.MouseDown += EditableFilePropControl_MouseDown;
+            txtSummComments.Enter     += EditableFilePropControl_Enter;
             tblSumm.Controls.Add(new Label { Text = "Comments:", AutoSize = true,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 Margin = new Padding(0, 4, 4, 0) }, 0, 6);
             tblSumm.Controls.Add(txtSummComments, 1, 6);
 
-            var btnApplySumm = new Button { Text = "Apply Summary", Width = 130, Height = 28 };
-            btnApplySumm.Click += BtnApplySummary_Click;
-            var summBtnRow = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Bottom, Height = 36,
-                FlowDirection = FlowDirection.RightToLeft,
-                Padding = new Padding(4, 4, 4, 4)
-            };
-            summBtnRow.Controls.Add(btnApplySumm);
+            txtSummTitle.TextChanged     += MarkFilePropsDirty;
+            txtSummSubject.TextChanged   += MarkFilePropsDirty;
+            txtSummAuthor.TextChanged    += MarkFilePropsDirty;
+            txtSummKeywords.TextChanged  += MarkFilePropsDirty;
+            txtSummHyperlink.TextChanged += MarkFilePropsDirty;
+            txtSummRevision.TextChanged  += MarkFilePropsDirty;
+            txtSummComments.TextChanged  += MarkFilePropsDirty;
+
             subSummary.Controls.Add(tblSumm);
-            subSummary.Controls.Add(summBtnRow);
 
             // ── Sub-tab C: File Info ──────────────────────────────────────
             var subInfo = new TabPage("File Info");
@@ -375,7 +452,19 @@ namespace IWCCadToolsV9.UI
             fileTabCtl.TabPages.Add(subCustom);
             fileTabCtl.TabPages.Add(subSummary);
             fileTabCtl.TabPages.Add(subInfo);
+
+            var fileBtnRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom, Height = 40,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(4, 5, 4, 4)
+            };
+            btnSaveFileProps = new Button { Text = "Save Changes", Width = 120, Height = 28, Visible = false, Enabled = false };
+            btnSaveFileProps.Click += btnSaveFileProps_Click;
+            fileBtnRow.Controls.Add(btnSaveFileProps);
+
             tabFile.Controls.Add(fileTabCtl);
+            tabFile.Controls.Add(fileBtnRow);
 
             tabControl.Controls.AddRange(new Control[] { tabProj, tabFile });
             Controls.Add(tabControl);
@@ -410,9 +499,9 @@ namespace IWCCadToolsV9.UI
         private Button          btnRefresh       = null!;
         private Button          btnChangeProject = null!;
 
-        // Controls — Tab 2 / Custom Properties sub-tab
+        // Controls — Tab 2 / File Properties tab
         private DataGridView    dgvCustomProps   = null!;
-        private Button          btnSyncTitleblock = null!;
+        private Button          btnSaveFileProps  = null!;
 
         // Controls — Tab 2 / Summary sub-tab
         private TextBox         txtSummTitle     = null!;

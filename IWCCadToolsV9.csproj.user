@@ -26,6 +26,18 @@
     <Compile Update="UI\FrmAssemblyEditor.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="UI\FrmBlockSearch.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\FrmProjectHardwareEditor.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\FrmProjectMaterialEditor.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\FrmProjectSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="UI\GroupPickerForm.cs">
       <SubType>Form</SubType>
     </Compile>

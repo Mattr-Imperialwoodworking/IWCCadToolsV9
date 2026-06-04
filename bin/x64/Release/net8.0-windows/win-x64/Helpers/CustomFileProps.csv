@@ -1,0 +1,14 @@
+# IWC Custom DWG File Properties
+# Format: PropertyName,DatasetColumnName
+# Leave DatasetColumnName empty to use built-in logic (ProjNum, ProjName, ProjID)
+IWC_ID,
+IWC_ProjNo,IDNum
+IWC_ProjName,Proj_Name
+IWC_Architect,ArchTb
+IWC_Contractor,ContTb
+IWC_PMINI,PMINI
+IWC_SeriesNo,
+IWC_SeriesID,
+IWC_SeriesName,
+IWC_Draft,
+IWC_Date,
