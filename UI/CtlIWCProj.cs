@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Printing;
@@ -121,6 +122,7 @@ namespace IWCCadToolsV9.UI
                 txtArch.Text     = proj.Architect;
                 txtCont.Text     = proj.Contractor;
                 txtPM.Text       = proj.PMIni;
+                LoadProjectDashEditData(proj.Id, dash?.DashId ?? 0);
 
                 // Auto-sync project data to DWG custom file properties every time
                 // the project context is updated — keeps the file self-describing
@@ -1486,6 +1488,507 @@ namespace IWCCadToolsV9.UI
         {
             txtProjNum.Text = txtProjName.Text = txtArch.Text =
             txtCont.Text    = txtPM.Text       = "NA";
+
+            if (txtProjectAddress != null) txtProjectAddress.Text = string.Empty;
+            if (txtProjStartDate != null) txtProjStartDate.Text = string.Empty;
+            if (txtProjEstProduction != null) txtProjEstProduction.Text = string.Empty;
+            if (txtProjEstInstall != null) txtProjEstInstall.Text = string.Empty;
+            if (txtProjEstComplete != null) txtProjEstComplete.Text = string.Empty;
+            if (txtProjDaysTotal != null) txtProjDaysTotal.Text = string.Empty;
+            if (txtProjDaysRemaining != null) txtProjDaysRemaining.Text = string.Empty;
+            if (txtProjPercentUsed != null) txtProjPercentUsed.Text = string.Empty;
+            if (chkFSC != null) chkFSC.Checked = false;
+            if (chkLEED != null) chkLEED.Checked = false;
+            if (txtProjNotes != null) txtProjNotes.Text = string.Empty;
+            if (lblDashHeader != null) lblDashHeader.Text = "Current Dash Data";
+            ClearDashEditControls();
+            _timelineStart = _timelineEnd = null;
+            pnlTimeline?.Invalidate();
+        }
+
+        // -----------------------------------------------------------------------
+        // Current Project tab — project/dash edit loading and saving
+        // -----------------------------------------------------------------------
+
+        private bool _loadingProjectDashEdit;
+        private DateOnly? _timelineStart;
+        private DateOnly? _timelineEnd;
+
+        private sealed class ComboItem
+        {
+            public object? Value { get; init; }
+            public string Text { get; init; } = string.Empty;
+            public override string ToString() => Text;
+        }
+
+        private void LoadProjectDashEditData(int projectId, int dashId)
+        {
+            if (projectId <= 0 || txtProjectAddress == null) return;
+
+            _loadingProjectDashEdit = true;
+            try
+            {
+                using var conn = IWCConn.GetSqlConnection();
+                conn.Open();
+
+                LoadProjectEditRow(conn, projectId);
+                LoadDashLookups(conn, projectId);
+
+                if (dashId > 0)
+                    LoadDashEditRow(conn, dashId);
+                else
+                    ClearDashEditControls();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to load Current Project tab detail fields.\n\n{ex.Message}",
+                    "IWC Project Data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                _loadingProjectDashEdit = false;
+                pnlTimeline?.Invalidate();
+            }
+        }
+
+        private void LoadProjectEditRow(SqlConnection conn, int projectId)
+        {
+            using var cmd = new SqlCommand(@"
+                SELECT IDNum, Proj_Name, Proj_Add_St, Proj_Add_City, Proj_Add_State, Proj_Add_Zip,
+                       Proj_StartDate, Proj_EstProduction, Proj_EstInstall, Proj_EstComp,
+                       FSC, LEED, Proj_Notes
+                FROM dbo.Proj
+                WHERE ID = @projectId;", conn);
+            cmd.Parameters.AddWithValue("@projectId", projectId);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read()) return;
+
+            string street = SafeDbString(rdr, "Proj_Add_St");
+            string city = SafeDbString(rdr, "Proj_Add_City");
+            string state = SafeDbString(rdr, "Proj_Add_State");
+            string zip = SafeDbString(rdr, "Proj_Add_Zip");
+            txtProjectAddress.Text = string.Join(Environment.NewLine,
+                WhereNotBlank(new[]
+                {
+                    street,
+                    string.Join(", ", WhereNotBlank(new[] { city, state })),
+                    zip
+                }));
+
+            DateOnly? start = SafeDbDateOnly(rdr, "Proj_StartDate");
+            DateOnly? production = SafeDbDateOnly(rdr, "Proj_EstProduction");
+            DateOnly? install = SafeDbDateOnly(rdr, "Proj_EstInstall");
+            DateOnly? complete = SafeDbDateOnly(rdr, "Proj_EstComp");
+
+            txtProjStartDate.Text = FormatDate(start);
+            txtProjEstProduction.Text = FormatDate(production);
+            txtProjEstInstall.Text = FormatDate(install);
+            txtProjEstComplete.Text = FormatDate(complete);
+            chkFSC.Checked = SafeDbBool(rdr, "FSC");
+            chkLEED.Checked = SafeDbBool(rdr, "LEED");
+            txtProjNotes.Text = SafeDbString(rdr, "Proj_Notes");
+
+            UpdateProjectTimeline(start, complete);
+        }
+
+        private void UpdateProjectTimeline(DateOnly? start, DateOnly? complete)
+        {
+            _timelineStart = start;
+            _timelineEnd = complete;
+
+            if (start.HasValue && complete.HasValue && complete.Value >= start.Value)
+            {
+                var today = DateOnly.FromDateTime(DateTime.Today);
+                int total = complete.Value.DayNumber - start.Value.DayNumber + 1;
+                int remaining = Math.Max(0, complete.Value.DayNumber - today.DayNumber);
+                int elapsed = Math.Min(total, Math.Max(0, today.DayNumber - start.Value.DayNumber));
+                double pct = total > 0 ? elapsed * 100.0 / total : 0;
+
+                txtProjDaysTotal.Text = total.ToString("N0");
+                txtProjDaysRemaining.Text = remaining.ToString("N0");
+                txtProjPercentUsed.Text = pct.ToString("0.0") + "%";
+            }
+            else
+            {
+                txtProjDaysTotal.Text = string.Empty;
+                txtProjDaysRemaining.Text = string.Empty;
+                txtProjPercentUsed.Text = string.Empty;
+            }
+
+            pnlTimeline?.Invalidate();
+        }
+
+        private void LoadDashLookups(SqlConnection conn, int projectId)
+        {
+            FillCombo(cboDashType, conn,
+                "SELECT ID, Dash_Type AS DisplayText FROM dbo.Proj_Dash_Type ORDER BY ID;",
+                null, "ID", "DisplayText", includeBlank: true);
+
+            FillCombo(cboDashParent, conn, @"
+                SELECT d.ID,
+                       CONCAT(d.Dash_Num, CASE WHEN NULLIF(LTRIM(RTRIM(d.Dash_Desc)), '') IS NULL THEN '' ELSE ' - ' + d.Dash_Desc END) AS DisplayText
+                FROM dbo.Proj_Dash d
+                LEFT JOIN dbo.Proj_Dash_Type dt ON dt.ID = d.Dash_Type
+                WHERE d.Proj_ID = @projectId
+                  AND (d.Act_Void = 0 OR d.Act_Void IS NULL)
+                  AND (d.Dash_Type = 1 OR dt.Dash_Type = 'Series')
+                ORDER BY TRY_CAST(d.Dash_Num AS int), d.Dash_Num;",
+                new Dictionary<string, object?> { ["@projectId"] = projectId }, "ID", "DisplayText", includeBlank: true);
+
+            FillCombo(cboMfg, conn,
+                "SELECT ID, MfrName AS DisplayText FROM dbo.Proj_Dash_Mfr ORDER BY MfrName;",
+                null, "ID", "DisplayText", includeBlank: true);
+
+            FillCombo(cboDashStatus, conn,
+                "SELECT ID, Status AS DisplayText FROM dbo.Proj_Dash_Status ORDER BY ID;",
+                null, "ID", "DisplayText", includeBlank: true);
+
+            FillCombo(cboDwgDraftsman, conn, @"
+                SELECT ID, COALESCE(NULLIF(LTRIM(RTRIM(UserIni)), ''), UserName) AS DisplayText
+                FROM dbo.Mng_Users
+                WHERE UserRole = 'Eng'
+                  AND UserStatus = 'active'
+                ORDER BY DisplayText;",
+                null, "ID", "DisplayText", includeBlank: true);
+
+            FillCombo(cboDashUnit, conn,
+                "SELECT Unit AS ID, Unit AS DisplayText FROM dbo.Proj_Dash_Units WHERE Unit IS NOT NULL ORDER BY Unit;",
+                null, "ID", "DisplayText", includeBlank: true);
+        }
+
+        private void FillCombo(ComboBox combo, SqlConnection conn, string sql,
+            Dictionary<string, object?>? parameters, string valueColumn, string textColumn, bool includeBlank)
+        {
+            var items = new List<ComboItem>();
+            if (includeBlank) items.Add(new ComboItem { Value = null, Text = string.Empty });
+
+            using var cmd = new SqlCommand(sql, conn);
+            if (parameters != null)
+            {
+                foreach (var kv in parameters)
+                    cmd.Parameters.AddWithValue(kv.Key, kv.Value ?? DBNull.Value);
+            }
+
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                object? value = rdr[valueColumn] == DBNull.Value ? null : rdr[valueColumn];
+                string text = rdr[textColumn] == DBNull.Value ? string.Empty : rdr[textColumn].ToString() ?? string.Empty;
+                items.Add(new ComboItem { Value = value, Text = text });
+            }
+
+            combo.DisplayMember = nameof(ComboItem.Text);
+            combo.ValueMember = nameof(ComboItem.Value);
+            combo.DataSource = items;
+        }
+
+        private void LoadDashEditRow(SqlConnection conn, int dashId)
+        {
+            using var cmd = new SqlCommand(@"
+                SELECT ID, Proj_ID, Dash_Num, Dash_Desc, Dash_Qty, Dash_Unit,
+                       Date_TargetSubmit, Date_ActualSubmit,
+                       Date_TargetApprove, Date_ActualApprove,
+                       Date_Target_FD, Date_Actual_FD,
+                       Date_TargetRLSMfr, Date_ActualRlsMfr,
+                       Date_Target_FieldReady, Date_Actual_FieldReady,
+                       Date_TargetShip, Date_ActualShip,
+                       Mfg, Dwg_Draftsman, Dash_Room, Dash_Floor,
+                       DashStatus, Shop_Notes, Dash_Notes, Dash_Parent, Dash_Type
+                FROM dbo.Proj_Dash
+                WHERE ID = @dashId;", conn);
+            cmd.Parameters.AddWithValue("@dashId", dashId);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read())
+            {
+                ClearDashEditControls();
+                return;
+            }
+
+            lblDashHeader.Text = $"{SafeDbString(rdr, "Dash_Num")} {SafeDbString(rdr, "Dash_Desc")}".Trim();
+            SelectComboValue(cboDashType, SafeDbNullableInt(rdr, "Dash_Type"));
+            SelectComboValue(cboDashParent, SafeDbNullableInt(rdr, "Dash_Parent"));
+            SelectComboValue(cboMfg, SafeDbNullableInt(rdr, "Mfg"));
+            SelectComboValueOrText(cboDashStatus, ParseNullableInt(SafeDbString(rdr, "DashStatus")), SafeDbString(rdr, "DashStatus"));
+            SelectComboValue(cboDwgDraftsman, SafeDbNullableInt(rdr, "Dwg_Draftsman"));
+            SelectComboValue(cboDashUnit, SafeDbString(rdr, "Dash_Unit"));
+
+            txtDashFloor.Text = SafeDbIntString(rdr, "Dash_Floor");
+            txtDashRoom.Text = SafeDbString(rdr, "Dash_Room");
+            txtDashQty.Text = SafeDbIntString(rdr, "Dash_Qty");
+            txtDashNotes.Text = SafeDbString(rdr, "Dash_Notes");
+            txtShopNotes.Text = SafeDbString(rdr, "Shop_Notes");
+
+            txtDateTargetSubmit.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetSubmit"));
+            txtDateActualSubmit.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualSubmit"));
+            txtDateTargetApprove.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetApprove"));
+            txtDateActualApprove.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualApprove"));
+            txtDateTargetFD.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Target_FD"));
+            txtDateActualFD.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Actual_FD"));
+            txtDateTargetRlsMfr.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetRLSMfr"));
+            txtDateActualRlsMfr.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualRlsMfr"));
+            txtDateTargetFieldReady.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Target_FieldReady"));
+            txtDateActualFieldReady.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Actual_FieldReady"));
+            txtDateTargetShip.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetShip"));
+            txtDateActualShip.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualShip"));
+        }
+
+        private void ClearDashEditControls()
+        {
+            if (cboDashType == null) return;
+            SelectComboValue(cboDashType, null);
+            SelectComboValue(cboDashParent, null);
+            SelectComboValue(cboMfg, null);
+            SelectComboValue(cboDashStatus, null);
+            SelectComboValue(cboDwgDraftsman, null);
+            SelectComboValue(cboDashUnit, null);
+            txtDashFloor.Text = txtDashRoom.Text = txtDashQty.Text = string.Empty;
+            txtDashNotes.Text = txtShopNotes.Text = string.Empty;
+            txtDateTargetSubmit.Text = txtDateActualSubmit.Text = string.Empty;
+            txtDateTargetApprove.Text = txtDateActualApprove.Text = string.Empty;
+            txtDateTargetFD.Text = txtDateActualFD.Text = string.Empty;
+            txtDateTargetRlsMfr.Text = txtDateActualRlsMfr.Text = string.Empty;
+            txtDateTargetFieldReady.Text = txtDateActualFieldReady.Text = string.Empty;
+            txtDateTargetShip.Text = txtDateActualShip.Text = string.Empty;
+        }
+
+        private void SaveProjectDashDetails()
+        {
+            if (_loadingProjectDashEdit) return;
+            int projectId = _currentSvc?.Project?.Id ?? 0;
+            int dashId = _currentSvc?.Dash?.DashId ?? 0;
+            if (projectId <= 0)
+            {
+                MessageBox.Show("No project is currently associated with this drawing.",
+                    "IWC Project Data", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                using var conn = IWCConn.GetSqlConnection();
+                conn.Open();
+
+                using (var cmd = new SqlCommand(@"
+                    UPDATE dbo.Proj
+                    SET Proj_StartDate = @Proj_StartDate,
+                        Proj_EstProduction = @Proj_EstProduction,
+                        Proj_EstInstall = @Proj_EstInstall,
+                        Proj_EstComp = @Proj_EstComp,
+                        FSC = @FSC,
+                        LEED = @LEED,
+                        Proj_Notes = @Proj_Notes,
+                        Date_Modified = SYSUTCDATETIME()
+                    WHERE ID = @ProjectId;", conn))
+                {
+                    cmd.Parameters.AddWithValue("@ProjectId", projectId);
+                    AddDateParam(cmd, "@Proj_StartDate", txtProjStartDate.Text);
+                    AddDateParam(cmd, "@Proj_EstProduction", txtProjEstProduction.Text);
+                    AddDateParam(cmd, "@Proj_EstInstall", txtProjEstInstall.Text);
+                    AddDateParam(cmd, "@Proj_EstComp", txtProjEstComplete.Text);
+                    cmd.Parameters.AddWithValue("@FSC", chkFSC.Checked);
+                    cmd.Parameters.AddWithValue("@LEED", chkLEED.Checked);
+                    cmd.Parameters.AddWithValue("@Proj_Notes", NullIfBlank(txtProjNotes.Text));
+                    cmd.ExecuteNonQuery();
+                }
+
+                if (dashId > 0)
+                {
+                    using var cmd = new SqlCommand(@"
+                        UPDATE dbo.Proj_Dash
+                        SET Dash_Type = @Dash_Type,
+                            Dash_Parent = @Dash_Parent,
+                            Mfg = @Mfg,
+                            DashStatus = @DashStatus,
+                            Dwg_Draftsman = @Dwg_Draftsman,
+                            Dash_Floor = @Dash_Floor,
+                            Dash_Room = @Dash_Room,
+                            Dash_Qty = @Dash_Qty,
+                            Dash_Unit = @Dash_Unit,
+                            Date_TargetSubmit = @Date_TargetSubmit,
+                            Date_ActualSubmit = @Date_ActualSubmit,
+                            Date_TargetApprove = @Date_TargetApprove,
+                            Date_ActualApprove = @Date_ActualApprove,
+                            Date_Target_FD = @Date_Target_FD,
+                            Date_Actual_FD = @Date_Actual_FD,
+                            Date_TargetRLSMfr = @Date_TargetRLSMfr,
+                            Date_ActualRlsMfr = @Date_ActualRlsMfr,
+                            Date_Target_FieldReady = @Date_Target_FieldReady,
+                            Date_Actual_FieldReady = @Date_Actual_FieldReady,
+                            Date_TargetShip = @Date_TargetShip,
+                            Date_ActualShip = @Date_ActualShip,
+                            Dash_Notes = @Dash_Notes,
+                            Shop_Notes = @Shop_Notes,
+                            Date_DashUpdate = SYSUTCDATETIME()
+                        WHERE ID = @DashId;", conn);
+                    cmd.Parameters.AddWithValue("@DashId", dashId);
+                    AddIntParam(cmd, "@Dash_Type", SelectedComboInt(cboDashType));
+                    AddIntParam(cmd, "@Dash_Parent", SelectedComboInt(cboDashParent));
+                    AddIntParam(cmd, "@Mfg", SelectedComboInt(cboMfg));
+                    AddIntParam(cmd, "@DashStatus", SelectedComboInt(cboDashStatus));
+                    AddIntParam(cmd, "@Dwg_Draftsman", SelectedComboInt(cboDwgDraftsman));
+                    AddIntParam(cmd, "@Dash_Floor", ParseNullableInt(txtDashFloor.Text));
+                    cmd.Parameters.AddWithValue("@Dash_Room", NullIfBlank(txtDashRoom.Text));
+                    AddIntParam(cmd, "@Dash_Qty", ParseNullableInt(txtDashQty.Text));
+                    cmd.Parameters.AddWithValue("@Dash_Unit", SelectedComboText(cboDashUnit));
+                    AddDateParam(cmd, "@Date_TargetSubmit", txtDateTargetSubmit.Text);
+                    AddDateParam(cmd, "@Date_ActualSubmit", txtDateActualSubmit.Text);
+                    AddDateParam(cmd, "@Date_TargetApprove", txtDateTargetApprove.Text);
+                    AddDateParam(cmd, "@Date_ActualApprove", txtDateActualApprove.Text);
+                    AddDateParam(cmd, "@Date_Target_FD", txtDateTargetFD.Text);
+                    AddDateParam(cmd, "@Date_Actual_FD", txtDateActualFD.Text);
+                    AddDateParam(cmd, "@Date_TargetRLSMfr", txtDateTargetRlsMfr.Text);
+                    AddDateParam(cmd, "@Date_ActualRlsMfr", txtDateActualRlsMfr.Text);
+                    AddDateParam(cmd, "@Date_Target_FieldReady", txtDateTargetFieldReady.Text);
+                    AddDateParam(cmd, "@Date_Actual_FieldReady", txtDateActualFieldReady.Text);
+                    AddDateParam(cmd, "@Date_TargetShip", txtDateTargetShip.Text);
+                    AddDateParam(cmd, "@Date_ActualShip", txtDateActualShip.Text);
+                    cmd.Parameters.AddWithValue("@Dash_Notes", NullIfBlank(txtDashNotes.Text));
+                    cmd.Parameters.AddWithValue("@Shop_Notes", NullIfBlank(txtShopNotes.Text));
+                    cmd.ExecuteNonQuery();
+                }
+
+                LoadProjectDashEditData(projectId, dashId);
+                RefreshFromContext();
+                MessageBox.Show("Project and dash data saved.",
+                    "IWC Project Data", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to save project/dash data.\n\n{ex.Message}",
+                    "IWC Project Data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void pnlTimeline_Paint(object? sender, PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(Color.White);
+
+            var rect = new Rectangle(26, 28, Math.Max(10, pnlTimeline.Width - 52), 16);
+            using var outline = new Pen(Color.Black);
+            using var elapsedBrush = new SolidBrush(Color.Firebrick);
+            using var remainBrush = new SolidBrush(Color.Gold);
+            using var todayPen = new Pen(Color.Black, 2);
+            using var font = new Font(SystemFonts.DefaultFont.FontFamily, 7);
+
+            g.DrawRectangle(outline, rect);
+            if (!_timelineStart.HasValue || !_timelineEnd.HasValue || _timelineEnd.Value < _timelineStart.Value)
+            {
+                g.DrawString("Project timeline dates are not set.", SystemFonts.DefaultFont, Brushes.DimGray, 8, 8);
+                return;
+            }
+
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            int total = Math.Max(1, _timelineEnd.Value.DayNumber - _timelineStart.Value.DayNumber);
+            double t = Math.Clamp((today.DayNumber - _timelineStart.Value.DayNumber) / (double)total, 0, 1);
+            int usedWidth = (int)Math.Round(rect.Width * t);
+            if (usedWidth > 0) g.FillRectangle(elapsedBrush, rect.X + 1, rect.Y + 1, usedWidth, rect.Height - 1);
+            if (usedWidth < rect.Width) g.FillRectangle(remainBrush, rect.X + usedWidth, rect.Y + 1, rect.Width - usedWidth - 1, rect.Height - 1);
+            int todayX = rect.X + usedWidth;
+            g.DrawLine(todayPen, todayX, rect.Y - 6, todayX, rect.Bottom + 10);
+            g.DrawString(FormatDate(_timelineStart), font, Brushes.Black, rect.X - 18, rect.Y - 18);
+            string endText = FormatDate(_timelineEnd);
+            var endSize = g.MeasureString(endText, font);
+            g.DrawString(endText, font, Brushes.Black, rect.Right - endSize.Width + 18, rect.Y - 18);
+            g.DrawString($"{t * 100:0.0}%", font, Brushes.Black, rect.X + rect.Width / 2 - 16, rect.Y - 14);
+            g.DrawString("Today", font, Brushes.DimGray, todayX - 12, rect.Bottom + 10);
+            g.DrawRectangle(outline, rect);
+        }
+
+        private static string FormatDate(DateOnly? date) => date.HasValue ? date.Value.ToString("M/d/yyyy") : string.Empty;
+
+        private static DateOnly? SafeDbDateOnly(SqlDataReader rdr, string column)
+        {
+            try
+            {
+                int i = rdr.GetOrdinal(column);
+                if (rdr.IsDBNull(i)) return null;
+                return DateOnly.FromDateTime(Convert.ToDateTime(rdr.GetValue(i)));
+            }
+            catch { return null; }
+        }
+
+        private static bool SafeDbBool(SqlDataReader rdr, string column)
+        {
+            try
+            {
+                int i = rdr.GetOrdinal(column);
+                return !rdr.IsDBNull(i) && Convert.ToBoolean(rdr.GetValue(i));
+            }
+            catch { return false; }
+        }
+
+        private static IEnumerable<string> WhereNotBlank(IEnumerable<string> values)
+        {
+            foreach (var value in values)
+                if (!string.IsNullOrWhiteSpace(value))
+                    yield return value.Trim();
+        }
+
+        private static int? ParseNullableInt(string? text)
+            => int.TryParse((text ?? string.Empty).Trim(), out int value) ? value : null;
+
+        private static object NullIfBlank(string? text)
+            => string.IsNullOrWhiteSpace(text) ? DBNull.Value : text.Trim();
+
+        private static void AddDateParam(SqlCommand cmd, string name, string text)
+        {
+            if (DateTime.TryParse(text, out var dt))
+                cmd.Parameters.AddWithValue(name, (object)dt.Date);
+            else
+                cmd.Parameters.AddWithValue(name, DBNull.Value);
+        }
+
+        private static void AddIntParam(SqlCommand cmd, string name, int? value)
+            => cmd.Parameters.AddWithValue(name, value.HasValue ? (object)value.Value : DBNull.Value);
+
+        private static int? SelectedComboInt(ComboBox combo)
+        {
+            if (combo.SelectedItem is ComboItem item && item.Value != null)
+                return Convert.ToInt32(item.Value);
+            return null;
+        }
+
+        private static object SelectedComboText(ComboBox combo)
+        {
+            if (combo.SelectedItem is ComboItem item && !string.IsNullOrWhiteSpace(item.Text))
+                return item.Text.Trim();
+            return DBNull.Value;
+        }
+
+        private static void SelectComboValueOrText(ComboBox combo, object? value, string? text)
+        {
+            SelectComboValue(combo, value);
+            if (combo.SelectedItem is ComboItem selected && selected.Value != null) return;
+            if (string.IsNullOrWhiteSpace(text)) return;
+            foreach (var obj in combo.Items)
+            {
+                if (obj is ComboItem item && string.Equals(item.Text, text.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+            }
+        }
+
+        private static void SelectComboValue(ComboBox combo, object? value)
+        {
+            if (combo.DataSource == null) return;
+            foreach (var obj in combo.Items)
+            {
+                if (obj is not ComboItem item) continue;
+                if (value == null && item.Value == null)
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+                if (value != null && item.Value != null && item.Value.ToString() == value.ToString())
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+            }
+            combo.SelectedIndex = combo.Items.Count > 0 ? 0 : -1;
         }
 
         // -----------------------------------------------------------------------
@@ -1505,6 +2008,9 @@ namespace IWCCadToolsV9.UI
         private void btnSaveFileProps_Click(object? sender, EventArgs e)
             => SaveFileProps();
 
+        private void btnSaveProjectDash_Click(object? sender, EventArgs e)
+            => SaveProjectDashDetails();
+
         // -----------------------------------------------------------------------
         // Designer-generated members (unchanged from original)
         // -----------------------------------------------------------------------
@@ -1517,24 +2023,183 @@ namespace IWCCadToolsV9.UI
             var tabFile  = new TabPage("File Properties");
 
             // --- Tab 1: Current Project ---
-            var grpProj = new GroupBox
+            var tabProjMain = new TableLayoutPanel
             {
-                Text = "Current Project Data", Dock = DockStyle.Fill,
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
                 Padding = new Padding(8)
             };
-            var tbl = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7,
-                Padding = new Padding(4)
-            };
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            tabProjMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            tabProjMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            tabProjMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
-            txtProjNum  = AddRow(tbl, 0, "Project Number:");
-            txtProjName = AddRow(tbl, 1, "Project Name:");
-            txtArch     = AddRow(tbl, 2, "Architect:");
-            txtCont     = AddRow(tbl, 3, "Contractor:");
-            txtPM       = AddRow(tbl, 4, "Project PM:");
+            lblCurrentProjectHeader = new Label
+            {
+                Text = "Current Project Data",
+                Dock = DockStyle.Fill,
+                Font = new Font(Font, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            tabProjMain.Controls.Add(lblCurrentProjectHeader, 0, 0);
+
+            var currentScroll = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            var editMain = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 3,
+                Padding = new Padding(6)
+            };
+            editMain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
+            editMain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
+            editMain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
+            currentScroll.Controls.Add(editMain);
+            tabProjMain.Controls.Add(currentScroll, 0, 1);
+
+            // Project summary / address area
+            var grpProjectInfo = new GroupBox
+            {
+                Text = "Project Information",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8),
+                MinimumSize = new Size(360, 250)
+            };
+            var tblProjInfo = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 8
+            };
+            tblProjInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
+            tblProjInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 6; i++) tblProjInfo.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            tblProjInfo.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+            tblProjInfo.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+
+            txtProjNum  = AddReadOnlyRow(tblProjInfo, 0, "Project Number:");
+            txtProjName = AddReadOnlyRow(tblProjInfo, 1, "Project Name:");
+            txtArch     = AddReadOnlyRow(tblProjInfo, 2, "Architect:");
+            txtCont     = AddReadOnlyRow(tblProjInfo, 3, "Contractor:");
+            txtPM       = AddReadOnlyRow(tblProjInfo, 4, "Project PM:");
+            tblProjInfo.Controls.Add(new Label { Text = "Project Address:", AutoSize = true, Anchor = AnchorStyles.Left | AnchorStyles.Top, Margin = new Padding(0, 6, 4, 0) }, 0, 6);
+            txtProjectAddress = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = SystemColors.Window };
+            tblProjInfo.Controls.Add(txtProjectAddress, 1, 6);
+            var certPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+            chkFSC = new CheckBox { Text = "FSC", Width = 70 };
+            chkLEED = new CheckBox { Text = "LEED", Width = 80 };
+            certPanel.Controls.Add(chkFSC);
+            certPanel.Controls.Add(chkLEED);
+            tblProjInfo.Controls.Add(new Label { Text = "Certifications:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 4, 0) }, 0, 7);
+            tblProjInfo.Controls.Add(certPanel, 1, 7);
+            grpProjectInfo.Controls.Add(tblProjInfo);
+            editMain.Controls.Add(grpProjectInfo, 0, 0);
+
+            // Project dates / timeline area
+            var grpProjectDates = new GroupBox
+            {
+                Text = "Project Dates",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8),
+                MinimumSize = new Size(360, 250)
+            };
+            var tblDates = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 6
+            };
+            tblDates.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
+            tblDates.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            tblDates.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            tblDates.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            for (int i = 0; i < 5; i++) tblDates.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            tblDates.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            txtProjStartDate = AddEditableRow(tblDates, 0, 0, "Start Date:");
+            txtProjEstProduction = AddEditableRow(tblDates, 1, 0, "Target Start Production:");
+            txtProjEstInstall = AddEditableRow(tblDates, 2, 0, "Target Start Installation:");
+            txtProjEstComplete = AddEditableRow(tblDates, 3, 0, "Target Completion Date:");
+            txtProjDaysTotal = AddReadOnlyRow(tblDates, 0, 2, "Total Project Days:");
+            txtProjDaysRemaining = AddReadOnlyRow(tblDates, 1, 2, "Days Remaining:");
+            txtProjPercentUsed = AddReadOnlyRow(tblDates, 2, 2, "Percent Utilized:");
+            tblDates.Controls.Add(new Label { Text = "Project Timeline:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft }, 0, 4);
+            tblDates.SetColumnSpan(tblDates.GetControlFromPosition(0, 4), 4);
+            pnlTimeline = new Panel { Dock = DockStyle.Fill, Height = 70, BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
+            pnlTimeline.Paint += pnlTimeline_Paint;
+            tblDates.Controls.Add(pnlTimeline, 0, 5);
+            tblDates.SetColumnSpan(pnlTimeline, 4);
+            grpProjectDates.Controls.Add(tblDates);
+            editMain.Controls.Add(grpProjectDates, 1, 0);
+            editMain.SetColumnSpan(grpProjectDates, 2);
+
+            // Dash details
+            var grpDashInfo = new GroupBox
+            {
+                Text = "Current Dash Data",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8),
+                MinimumSize = new Size(360, 300)
+            };
+            var dashInfo = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 9 };
+            dashInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
+            dashInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            dashInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 55));
+            dashInfo.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            for (int i = 0; i < 9; i++) dashInfo.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
+            lblDashHeader = new Label { Text = "Current Dash Data", Dock = DockStyle.Fill, Font = new Font(Font, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+            dashInfo.Controls.Add(lblDashHeader, 0, 0);
+            dashInfo.SetColumnSpan(lblDashHeader, 4);
+            cboDashType = AddComboRow(dashInfo, 1, "Dash Type:");
+            cboDashParent = AddComboRow(dashInfo, 2, "Dash Parent:");
+            cboMfg = AddComboRow(dashInfo, 3, "Manufacturer:");
+            cboDashStatus = AddComboRow(dashInfo, 4, "Dash Status:");
+            cboDwgDraftsman = AddComboRow(dashInfo, 5, "CAD:");
+            txtDashFloor = AddEditableRow(dashInfo, 6, 0, "Floor:");
+            txtDashRoom = AddEditableRow(dashInfo, 6, 2, "Room #:");
+            txtDashQty = AddEditableRow(dashInfo, 7, 0, "Qty:");
+            cboDashUnit = AddComboRow(dashInfo, 7, "Units:", labelColumn: 2, valueColumn: 3);
+            grpDashInfo.Controls.Add(dashInfo);
+            editMain.Controls.Add(grpDashInfo, 0, 1);
+
+            var grpSchedule = new GroupBox
+            {
+                Text = "Schedule Dates",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8),
+                MinimumSize = new Size(360, 300)
+            };
+            var sched = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 8 };
+            sched.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            sched.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            sched.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            for (int i = 0; i < 8; i++) sched.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
+            sched.Controls.Add(new Label { Text = "", Dock = DockStyle.Fill }, 0, 0);
+            sched.Controls.Add(new Label { Text = "Target:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }, 1, 0);
+            sched.Controls.Add(new Label { Text = "Actual:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }, 2, 0);
+            txtDateTargetSubmit = AddScheduleRow(sched, 1, "Submittal:", out txtDateActualSubmit);
+            txtDateTargetApprove = AddScheduleRow(sched, 2, "Approval:", out txtDateActualApprove);
+            txtDateTargetFD = AddScheduleRow(sched, 3, "FD:", out txtDateActualFD);
+            txtDateTargetRlsMfr = AddScheduleRow(sched, 4, "Rls MFR:", out txtDateActualRlsMfr);
+            txtDateTargetFieldReady = AddScheduleRow(sched, 5, "Field Ready:", out txtDateActualFieldReady);
+            txtDateTargetShip = AddScheduleRow(sched, 6, "Ship:", out txtDateActualShip);
+            grpSchedule.Controls.Add(sched);
+            editMain.Controls.Add(grpSchedule, 0, 2);
+
+            var notesPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, MinimumSize = new Size(360, 300) };
+            notesPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            notesPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            txtDashNotes = AddMemoBox(notesPanel, 0, "Dash Specific Notes:");
+            txtShopNotes = AddMemoBox(notesPanel, 1, "Dash Shop Specific Notes:");
+            editMain.Controls.Add(notesPanel, 1, 1);
+            editMain.SetRowSpan(notesPanel, 2);
+
+            txtProjNotes = AddMemoBox(editMain, 1, "Project Specific Notes:", column: 2, rowSpan: 2);
 
             // Offline status label
             lblOffline = new Label
@@ -1542,23 +2207,23 @@ namespace IWCCadToolsV9.UI
                 Dock = DockStyle.Top, Height = 22, Visible = false,
                 ForeColor = Color.DarkOrange, Font = new Font(Font, FontStyle.Bold)
             };
-            tbl.Controls.Add(lblOffline, 0, 5);
-            tbl.SetColumnSpan(lblOffline, 2);
+            editMain.Controls.Add(lblOffline, 0, 3);
+            editMain.SetColumnSpan(lblOffline, 3);
 
             var btnPanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft,
-                AutoSize = true, Padding = new Padding(4)
+                Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(4)
             };
             btnRefresh         = new Button { Text = "Refresh",        Width = 100, Height = 30 };
-            btnChangeProject   = new Button { Text = "Change Project",  Width = 120, Height = 30 };
+            btnChangeProject   = new Button { Text = "Change Project", Width = 120, Height = 30 };
+            btnSaveProjectDash = new Button { Text = "Save Changes",   Width = 120, Height = 30 };
             btnRefresh.Click       += btnRefresh_Click;
             btnChangeProject.Click += btnChangeProject_Click;
-            btnPanel.Controls.AddRange(new Control[] { btnRefresh, btnChangeProject });
-
-            grpProj.Controls.Add(tbl);
-            grpProj.Controls.Add(btnPanel);
-            tabProj.Controls.Add(grpProj);
+            btnSaveProjectDash.Click += btnSaveProjectDash_Click;
+            btnPanel.Controls.AddRange(new Control[] { btnRefresh, btnChangeProject, btnSaveProjectDash });
+            tabProjMain.Controls.Add(btnPanel, 0, 2);
+            tabProj.Controls.Add(tabProjMain);
 
             // --- Tab 2: Current BOM ---
             var bomMain = new TableLayoutPanel
@@ -1784,6 +2449,112 @@ namespace IWCCadToolsV9.UI
             Name = "CtlIWCProj";
         }
 
+        private static TextBox AddReadOnlyRow(TableLayoutPanel tbl, int row, string label)
+            => AddReadOnlyRow(tbl, row, 0, label);
+
+        private static TextBox AddReadOnlyRow(TableLayoutPanel tbl, int row, int labelColumn, string label)
+        {
+            int valueColumn = labelColumn + 1;
+            tbl.Controls.Add(new Label
+            {
+                Text = label,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 6, 4, 0)
+            }, labelColumn, row);
+            var tb = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = SystemColors.Window
+            };
+            tbl.Controls.Add(tb, valueColumn, row);
+            return tb;
+        }
+
+        private static TextBox AddEditableRow(TableLayoutPanel tbl, int row, int labelColumn, string label)
+        {
+            int valueColumn = labelColumn + 1;
+            tbl.Controls.Add(new Label
+            {
+                Text = label,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 6, 4, 0)
+            }, labelColumn, row);
+            var tb = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Window
+            };
+            tbl.Controls.Add(tb, valueColumn, row);
+            return tb;
+        }
+
+        private static ComboBox AddComboRow(TableLayoutPanel tbl, int row, string label, int labelColumn = 0, int valueColumn = 1)
+        {
+            tbl.Controls.Add(new Label
+            {
+                Text = label,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 6, 4, 0)
+            }, labelColumn, row);
+            var combo = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            tbl.Controls.Add(combo, valueColumn, row);
+            return combo;
+        }
+
+        private static TextBox AddScheduleRow(TableLayoutPanel tbl, int row, string label, out TextBox actual)
+        {
+            tbl.Controls.Add(new Label
+            {
+                Text = label,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 6, 4, 0)
+            }, 0, row);
+            var target = new TextBox { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
+            actual = new TextBox { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
+            tbl.Controls.Add(target, 1, row);
+            tbl.Controls.Add(actual, 2, row);
+            return target;
+        }
+
+        private static TextBox AddMemoBox(TableLayoutPanel tbl, int row, string label, int column = 0, int rowSpan = 1)
+        {
+            var panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0, 2, 4, 4)
+            };
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            panel.Controls.Add(new Label
+            {
+                Text = label,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft
+            }, 0, 0);
+            var tb = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = SystemColors.Window
+            };
+            panel.Controls.Add(tb, 0, 1);
+            tbl.Controls.Add(panel, column, row);
+            if (rowSpan > 1) tbl.SetRowSpan(panel, rowSpan);
+            return tb;
+        }
+
         private static DataGridView CreateBomGrid()
         {
             return new DataGridView
@@ -1869,6 +2640,44 @@ namespace IWCCadToolsV9.UI
         private TextBox         txtPM            = null!;
         private Button          btnRefresh       = null!;
         private Button          btnChangeProject = null!;
+        private Button          btnSaveProjectDash = null!;
+        private Label           lblCurrentProjectHeader = null!;
+        private Label           lblDashHeader    = null!;
+        private TextBox         txtProjectAddress = null!;
+        private TextBox         txtProjStartDate = null!;
+        private TextBox         txtProjEstProduction = null!;
+        private TextBox         txtProjEstInstall = null!;
+        private TextBox         txtProjEstComplete = null!;
+        private TextBox         txtProjDaysTotal = null!;
+        private TextBox         txtProjDaysRemaining = null!;
+        private TextBox         txtProjPercentUsed = null!;
+        private CheckBox        chkFSC = null!;
+        private CheckBox        chkLEED = null!;
+        private Panel           pnlTimeline = null!;
+        private ComboBox        cboDashType = null!;
+        private ComboBox        cboDashParent = null!;
+        private ComboBox        cboMfg = null!;
+        private ComboBox        cboDashStatus = null!;
+        private ComboBox        cboDwgDraftsman = null!;
+        private TextBox         txtDashFloor = null!;
+        private TextBox         txtDashRoom = null!;
+        private TextBox         txtDashQty = null!;
+        private ComboBox        cboDashUnit = null!;
+        private TextBox         txtDateTargetSubmit = null!;
+        private TextBox         txtDateActualSubmit = null!;
+        private TextBox         txtDateTargetApprove = null!;
+        private TextBox         txtDateActualApprove = null!;
+        private TextBox         txtDateTargetFD = null!;
+        private TextBox         txtDateActualFD = null!;
+        private TextBox         txtDateTargetRlsMfr = null!;
+        private TextBox         txtDateActualRlsMfr = null!;
+        private TextBox         txtDateTargetFieldReady = null!;
+        private TextBox         txtDateActualFieldReady = null!;
+        private TextBox         txtDateTargetShip = null!;
+        private TextBox         txtDateActualShip = null!;
+        private TextBox         txtDashNotes = null!;
+        private TextBox         txtShopNotes = null!;
+        private TextBox         txtProjNotes = null!;
 
 
         // Controls — Tab 2 (Current BOM)
