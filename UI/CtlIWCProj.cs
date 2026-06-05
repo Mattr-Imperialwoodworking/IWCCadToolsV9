@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using Autodesk.AutoCAD.EditorInput;
 using IWCCadToolsV9.Data;
 using IWCCadToolsV9.Core;
+using IWCCadToolsV9.Commands;
 using IWCCadToolsV9.Data.Models;
 using Microsoft.Data.SqlClient;
 using Application = Autodesk.AutoCAD.ApplicationServices.Application;
@@ -35,6 +36,7 @@ namespace IWCCadToolsV9.UI
             TabStop = true;
 
             InitializeComponent();
+            ConfigureLargeNoteTextBoxes();
             tabControl.Dock = DockStyle.Fill;
             Dock            = DockStyle.Fill;
 
@@ -441,7 +443,25 @@ namespace IWCCadToolsV9.UI
         }
 
         private void btnBomRefresh_Click(object? sender, EventArgs e)
-            => LoadCurrentBom(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+        {
+            LoadCurrentBom(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            RefreshExistingBomTablesInDrawing();
+        }
+
+        private static void RefreshExistingBomTablesInDrawing()
+        {
+            try
+            {
+                // Updates only tables that already exist in the current drawing and have
+                // a stored IWC table reference: hardware, materials, and metal parts.
+                TableCommands.AutoUpdateExistingTablesInActiveDocument(quiet: false);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Current BOM lists were refreshed, but existing AutoCAD tables could not be updated.\n\n{ex.Message}",
+                    "IWC Current BOM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
 
         private void btnBomExportPdf_Click(object? sender, EventArgs e)
             => ExportCurrentBomPdf();
@@ -454,6 +474,9 @@ namespace IWCCadToolsV9.UI
 
         private void btnBomInsertMetalTable_Click(object? sender, EventArgs e)
             => RunAcadCommandFromPalette("IWCInsertMetalTable");
+
+        private void btnBomInsertCompList_Click(object? sender, EventArgs e)
+            => RunAcadCommandFromPalette("IWC_CompList");
 
         private static void RunAcadCommandFromPalette(string commandName)
         {
@@ -2346,6 +2369,7 @@ namespace IWCCadToolsV9.UI
             btnBomInsertHdwTable = new Button { Text = "Insert Hdw Table", Width = 125, Height = 28 };
             btnBomInsertMatTable = new Button { Text = "Insert Material table", Width = 125, Height = 28 };
             btnBomInsertMetalTable = new Button { Text = "Insert Metal Table", Width = 130, Height = 28 };
+            btnBomInsertCompList = new Button { Text = "Insert Comp List", Width = 130, Height = 28 };
             btnBomRefresh.Click += btnBomRefresh_Click;
             btnBomExportPdf.Click += btnBomExportPdf_Click;
             btnBomAddMaterial.Click += btnBomAddMaterial_Click;
@@ -2353,11 +2377,13 @@ namespace IWCCadToolsV9.UI
             btnBomInsertHdwTable.Click += btnBomInsertHdwTable_Click;
             btnBomInsertMatTable.Click += btnBomInsertMatTable_Click;
             btnBomInsertMetalTable.Click += btnBomInsertMetalTable_Click;
+            btnBomInsertCompList.Click += btnBomInsertCompList_Click;
             bomButtonRow.Controls.AddRange(new Control[]
             {
                 btnBomRefresh,
                 btnBomExportPdf,
                 btnBomInsertMetalTable,
+                btnBomInsertCompList,
                 btnBomInsertMatTable,
                 btnBomInsertHdwTable,
                 btnBomAddHardware,
@@ -2646,6 +2672,24 @@ namespace IWCCadToolsV9.UI
             return panel;
         }
 
+        private void ConfigureLargeNoteTextBoxes()
+        {
+            ConfigureMultilineTextBox(txtDashNotes);
+            ConfigureMultilineTextBox(txtProjNotes);
+            ConfigureMultilineTextBox(txtShopNotes);
+        }
+
+        private static void ConfigureMultilineTextBox(TextBox tb)
+        {
+            if (tb == null) return;
+
+            tb.Multiline = true;
+            tb.AcceptsReturn = true;
+            tb.AcceptsTab = true;
+            tb.WordWrap = true;
+            tb.ScrollBars = ScrollBars.Vertical;
+        }
+
         private static TextBox AddRow(TableLayoutPanel tbl, int row, string label)
         {
             tbl.Controls.Add(new Label
@@ -2725,6 +2769,7 @@ namespace IWCCadToolsV9.UI
         private Button          btnBomInsertHdwTable = null!;
         private Button          btnBomInsertMatTable = null!;
         private Button          btnBomInsertMetalTable = null!;
+        private Button          btnBomInsertCompList = null!;
 
         // Controls — Tab 3 / File Properties tab
         private DataGridView    dgvCustomProps   = null!;
