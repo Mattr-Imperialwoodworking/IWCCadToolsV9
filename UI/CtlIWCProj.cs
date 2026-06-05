@@ -446,6 +446,23 @@ namespace IWCCadToolsV9.UI
         private void btnBomExportPdf_Click(object? sender, EventArgs e)
             => ExportCurrentBomPdf();
 
+        private void btnBomInsertHdwTable_Click(object? sender, EventArgs e)
+            => RunAcadCommandFromPalette("IWCInsertHardwareTable");
+
+        private void btnBomInsertMatTable_Click(object? sender, EventArgs e)
+            => RunAcadCommandFromPalette("IWCInsertMaterialTable");
+
+        private void btnBomInsertMetalTable_Click(object? sender, EventArgs e)
+            => RunAcadCommandFromPalette("IWCInsertMetalTable");
+
+        private static void RunAcadCommandFromPalette(string commandName)
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+
+            doc.SendStringToExecute($"{commandName} ", true, false, false);
+        }
+
         private void btnBomAddMaterial_Click(object? sender, EventArgs e)
         {
             int projectId = _currentSvc?.Project?.Id ?? 0;
@@ -2238,7 +2255,7 @@ namespace IWCCadToolsV9.UI
             bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
             bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
             bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 32));
-            bomMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            bomMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
 
             lblBomContext = new Label
             {
@@ -2326,11 +2343,26 @@ namespace IWCCadToolsV9.UI
             btnBomExportPdf = new Button { Text = "Export PDF", Width = 100, Height = 28 };
             btnBomAddMaterial = new Button { Text = "Add Material", Width = 105, Height = 28 };
             btnBomAddHardware = new Button { Text = "Add Hardware", Width = 110, Height = 28 };
+            btnBomInsertHdwTable = new Button { Text = "Insert Hdw Table", Width = 125, Height = 28 };
+            btnBomInsertMatTable = new Button { Text = "Insert Material table", Width = 125, Height = 28 };
+            btnBomInsertMetalTable = new Button { Text = "Insert Metal Table", Width = 130, Height = 28 };
             btnBomRefresh.Click += btnBomRefresh_Click;
             btnBomExportPdf.Click += btnBomExportPdf_Click;
             btnBomAddMaterial.Click += btnBomAddMaterial_Click;
             btnBomAddHardware.Click += btnBomAddHardware_Click;
-            bomButtonRow.Controls.AddRange(new Control[] { btnBomRefresh, btnBomExportPdf, btnBomAddHardware, btnBomAddMaterial });
+            btnBomInsertHdwTable.Click += btnBomInsertHdwTable_Click;
+            btnBomInsertMatTable.Click += btnBomInsertMatTable_Click;
+            btnBomInsertMetalTable.Click += btnBomInsertMetalTable_Click;
+            bomButtonRow.Controls.AddRange(new Control[]
+            {
+                btnBomRefresh,
+                btnBomExportPdf,
+                btnBomInsertMetalTable,
+                btnBomInsertMatTable,
+                btnBomInsertHdwTable,
+                btnBomAddHardware,
+                btnBomAddMaterial
+            });
             bomMain.Controls.Add(bomButtonRow, 0, 5);
             tabBom.Controls.Add(bomMain);
 
@@ -2690,6 +2722,9 @@ namespace IWCCadToolsV9.UI
         private Button          btnBomExportPdf    = null!;
         private Button          btnBomAddMaterial  = null!;
         private Button          btnBomAddHardware  = null!;
+        private Button          btnBomInsertHdwTable = null!;
+        private Button          btnBomInsertMatTable = null!;
+        private Button          btnBomInsertMetalTable = null!;
 
         // Controls — Tab 3 / File Properties tab
         private DataGridView    dgvCustomProps   = null!;

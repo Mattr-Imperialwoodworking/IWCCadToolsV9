@@ -26,7 +26,7 @@ namespace IWCCadToolsV9.Commands
         /// <summary>
         /// Refreshes existing IWC material and hardware AutoCAD tables in the active drawing.
         /// This is used by the drawing lifecycle startup path so users do not need to run
-        /// IWCUpdateMaterialTable or IWCUpdateHardwareTable manually after opening a linked DWG.
+        /// IWCUpdateMaterialTable, IWCUpdateHardwareTable, or IWCUpdateMetalTable manually after opening a linked DWG.
         /// Only tables that have previously been inserted and stored through TableReferenceHelper
         /// are updated; missing table references are ignored.
         /// </summary>
@@ -53,7 +53,7 @@ namespace IWCCadToolsV9.Commands
                             var data = QueryMaterialTable(dashId);
                             if (data != null)
                             {
-                                anyUpdated |= TryUpdateAcadTable(db, materialTableId, data, AcadTableHelper.MaterialCols, "material", ed, quiet);
+                                anyUpdated |= TryUpdateAcadTable(db, materialTableId, data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt()), "material", ed, quiet);
                             }
                         }
                     }
@@ -67,7 +67,21 @@ namespace IWCCadToolsV9.Commands
                             var data = QueryHardwareTable(dash);
                             if (data != null)
                             {
-                                anyUpdated |= TryUpdateAcadTable(db, hardwareTableId, data, AcadTableHelper.HardwareCols, "hardware", ed, quiet);
+                                anyUpdated |= TryUpdateAcadTable(db, hardwareTableId, data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash), "hardware", ed, quiet);
+                            }
+                        }
+                    }
+
+                    var metalTableId = TableReferenceHelper.RetrieveTableReference(db, TableReferenceHelper.MetalTableKey);
+                    if (!metalTableId.IsNull)
+                    {
+                        string? dashId = AcadFilePropHelper.GetCustomProperty("IWC_SeriesID");
+                        if (!string.IsNullOrWhiteSpace(dashId))
+                        {
+                            var data = QueryMetalTable(dashId);
+                            if (data != null)
+                            {
+                                anyUpdated |= TryUpdateAcadTable(db, metalTableId, data, AcadTableHelper.MetalCols, BuildTableTitle("METAL PARTS TABLE", ResolveDashFromPropertiesNoPrompt()), "metal", ed, quiet);
                             }
                         }
                     }
@@ -85,7 +99,7 @@ namespace IWCCadToolsV9.Commands
             }
         }
 
-        private static bool TryUpdateAcadTable(Database db, ObjectId tableId, DataTable data, AcadTableHelper.ColumnSpec[] columns, string tableName, Editor ed, bool quiet)
+        private static bool TryUpdateAcadTable(Database db, ObjectId tableId, DataTable data, AcadTableHelper.ColumnSpec[] columns, string titleText, string tableName, Editor ed, bool quiet)
         {
             if (data.Rows.Count == 0)
             {
@@ -101,11 +115,19 @@ namespace IWCCadToolsV9.Commands
                 return false;
             }
 
-            AcadTableHelper.UpdateTable(acadTable, data, columns);
+            AcadTableHelper.ApplyPreferredTableStyle(acadTable, db, tr);
+            AcadTableHelper.UpdateTable(acadTable, data, columns, titleText);
             tr.Commit();
 
             if (!quiet) ed.WriteMessage($"\n{System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(tableName)} table updated.\n");
             return true;
+        }
+
+        private static string BuildTableTitle(string tableName, string? dashDisplay)
+        {
+            return string.IsNullOrWhiteSpace(dashDisplay)
+                ? tableName
+                : $"{tableName}: {dashDisplay.Trim()}";
         }
 
         private static string? ResolveDashFromPropertiesNoPrompt()
@@ -146,7 +168,7 @@ namespace IWCCadToolsV9.Commands
             if (data == null || data.Rows.Count == 0)
             { ed.WriteMessage($"\nNo hardware found for Dash {dash}."); return; }
 
-            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.HardwareCols);
+            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash));
             InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.HardwareTableKey);
             ed.WriteMessage("\nHardware table inserted.");
         }
@@ -173,7 +195,7 @@ namespace IWCCadToolsV9.Commands
             var acadTable = tr.GetObject(tableId, OpenMode.ForWrite) as Table;
             if (acadTable == null) { ed.WriteMessage("\nHardware table not found."); return; }
 
-            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.HardwareCols);
+            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash));
             tr.Commit();
             ed.WriteMessage("\nHardware table updated.");
         }
@@ -201,7 +223,7 @@ namespace IWCCadToolsV9.Commands
             if (data == null || data.Rows.Count == 0)
             { ed.WriteMessage($"\nNo materials found for DashID {dashId}."); return; }
 
-            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.MaterialCols);
+            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
             InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.MaterialTableKey);
             ed.WriteMessage("\nMaterial table inserted.");
         }
@@ -230,9 +252,66 @@ namespace IWCCadToolsV9.Commands
             var acadTable = tr.GetObject(tableId, OpenMode.ForWrite) as Table;
             if (acadTable == null) { ed.WriteMessage("\nMaterial table not found."); return; }
 
-            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.MaterialCols);
+            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
             tr.Commit();
             ed.WriteMessage("\nMaterial table updated.");
+        }
+
+        // =========================================================================
+        // METAL TABLE
+        // =========================================================================
+
+        [CommandMethod("IWCInsertMetalTable")]
+        public static void InsertMetalTable()
+        {
+            var doc = Autodesk.AutoCAD.ApplicationServices.Application
+                          .DocumentManager.MdiActiveDocument;
+            var ed = doc.Editor;
+
+            string? dashId = AcadFilePropHelper.GetCustomProperty("IWC_SeriesID");
+            if (string.IsNullOrEmpty(dashId))
+                dashId = Prompt(ed, "Enter Section ID for DashID:");
+            if (string.IsNullOrEmpty(dashId)) return;
+
+            var ppr = ed.GetPoint(new PromptPointOptions("\nSelect insertion point for metal table:"));
+            if (ppr.Status != PromptStatus.OK) return;
+
+            var data = QueryMetalTable(dashId);
+            if (data == null || data.Rows.Count == 0)
+            { ed.WriteMessage($"\nNo metal parts found for DashID {dashId}."); return; }
+
+            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.MetalCols, BuildTableTitle("METAL PARTS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
+            InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.MetalTableKey);
+            ed.WriteMessage("\nMetal table inserted.");
+        }
+
+        [CommandMethod("IWCUpdateMetalTable")]
+        public static void UpdateMetalTable()
+        {
+            var doc = Autodesk.AutoCAD.ApplicationServices.Application
+                          .DocumentManager.MdiActiveDocument;
+            var ed  = doc.Editor;
+            var db  = doc.Database;
+
+            var tableId = TableReferenceHelper.RetrieveTableReference(db, TableReferenceHelper.MetalTableKey);
+            if (tableId.IsNull) { ed.WriteMessage("\nNo metal table reference found."); return; }
+
+            string? dashId = AcadFilePropHelper.GetCustomProperty("IWC_SeriesID");
+            if (string.IsNullOrEmpty(dashId))
+                dashId = Prompt(ed, "Enter Section ID for DashID:");
+            if (string.IsNullOrEmpty(dashId)) return;
+
+            var data = QueryMetalTable(dashId);
+            if (data == null || data.Rows.Count == 0)
+            { ed.WriteMessage($"\nNo metal parts found for DashID {dashId}."); return; }
+
+            using var tr = db.TransactionManager.StartTransaction();
+            var acadTable = tr.GetObject(tableId, OpenMode.ForWrite) as Table;
+            if (acadTable == null) { ed.WriteMessage("\nMetal table not found."); return; }
+
+            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.MetalCols, BuildTableTitle("METAL PARTS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
+            tr.Commit();
+            ed.WriteMessage("\nMetal table updated.");
         }
 
         // =========================================================================
@@ -261,6 +340,24 @@ namespace IWCCadToolsV9.Commands
             using var cmd = new SqlCommand(
                 "SELECT MatNo, MatDesc, MatApprove, MatGroup FROM dbo.Dash_Mat_Compile WHERE DashID = @id",
                 conn.OpenConn);
+            cmd.Parameters.AddWithValue("@id", dashId);
+            using var da = new SqlDataAdapter(cmd);
+            var ds = new DataSet();
+            da.Fill(ds);
+            return ds.Tables.Count > 0 ? ds.Tables[0] : null;
+        }
+
+        private static DataTable? QueryMetalTable(string dashId)
+        {
+            using var conn = new IWCConn();
+            conn.DBConnect();
+            using var cmd = new SqlCommand(@"
+                SELECT Mtl_PrtNo, Mtl_PrtDesc, Mtl_Finish, Mtl_Material,
+                       Mtl_Length, Mtl_Width, Mtl_Height, Mtl_Thk,
+                       Mtl_Qty, Mtl_QtyUnits, Mtl_ShtReference, Mtl_Notes
+                FROM dbo.Proj_Mtl
+                WHERE DashID = @id
+                ORDER BY Mtl_PrtNo, ID;", conn.OpenConn);
             cmd.Parameters.AddWithValue("@id", dashId);
             using var da = new SqlDataAdapter(cmd);
             var ds = new DataSet();
@@ -308,6 +405,8 @@ namespace IWCCadToolsV9.Commands
         {
             var db = doc.Database;
             using var tr = db.TransactionManager.StartTransaction();
+            AcadTableHelper.ApplyPreferredTableStyle(table, db, tr);
+
             table.Position = insPt;
             var btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
             btr.AppendEntity(table);

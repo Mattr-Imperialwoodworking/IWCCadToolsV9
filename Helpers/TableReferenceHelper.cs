@@ -14,6 +14,7 @@ namespace IWCCadToolsV9.Helpers
     {
         public const string HardwareTableKey = "IWC_HardwareTableId";
         public const string MaterialTableKey  = "IWC_MaterialTableId";
+        public const string MetalTableKey     = "IWC_MetalTableId";
 
         // ---------------------------------------------------------------------------
         // Store
