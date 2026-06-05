@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Printing;
+using System.Linq;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.EditorInput;
 using IWCCadToolsV9.Data;
@@ -492,19 +493,16 @@ namespace IWCCadToolsV9.UI
             int dashId = _currentSvc?.Dash?.DashId ?? 0;
             if (projectId <= 0 || dashId <= 0) return;
 
-            var item = PickProjectItem(projectId, "Material", @"
+            var items = PickProjectItems(projectId, "Material", @"
                 SELECT ID, MatNo AS ItemNo, MatDesc AS ItemDesc
                 FROM dbo.Proj_Mat
                 WHERE Proj_ID = @projId AND (MatVoid = 0 OR MatVoid IS NULL)
                 ORDER BY MatNo;");
-            if (item == null) return;
+            if (items.Count == 0) return;
 
-            bool cancelled;
-            long? qty = PromptForBomQty(item.Value.No, item.Value.Description, _currentSvc?.Dash?.DashNum ?? dashId.ToString(), out cancelled);
-            if (cancelled) return;
-            if (qty == null && !ConfirmedNullQty("material")) return;
+            foreach (var item in items)
+                AssociateMaterialToDash(item.Id, dashId, 0);
 
-            AssociateMaterialToDash(item.Value.Id, dashId, qty);
             LoadCurrentBom(projectId, dashId);
         }
 
@@ -514,19 +512,16 @@ namespace IWCCadToolsV9.UI
             int dashId = _currentSvc?.Dash?.DashId ?? 0;
             if (projectId <= 0 || dashId <= 0) return;
 
-            var item = PickProjectItem(projectId, "Hardware", @"
+            var items = PickProjectItems(projectId, "Hardware", @"
                 SELECT ID, HdwNo AS ItemNo, HdwDesc AS ItemDesc
                 FROM dbo.Proj_Hdw
                 WHERE Proj_ID = @projId AND (HdwVoid = 0 OR HdwVoid IS NULL)
                 ORDER BY HdwNo;");
-            if (item == null) return;
+            if (items.Count == 0) return;
 
-            bool cancelled;
-            long? qty = PromptForBomQty(item.Value.No, item.Value.Description, _currentSvc?.Dash?.DashNum ?? dashId.ToString(), out cancelled);
-            if (cancelled) return;
-            if (qty == null && !ConfirmedNullQty("hardware")) return;
+            foreach (var item in items)
+                AssociateHardwareToDash(item.Id, dashId, 0);
 
-            AssociateHardwareToDash(item.Value.Id, dashId, qty);
             LoadCurrentBom(projectId, dashId);
         }
 
@@ -1249,7 +1244,7 @@ namespace IWCCadToolsV9.UI
             return true;
         }
 
-        private static (int Id, string No, string Description)? PickProjectItem(int projectId, string itemType, string sql)
+        private static List<(int Id, string No, string Description)> PickProjectItems(int projectId, string itemType, string sql)
         {
             using var frm = new Form
             {
@@ -1270,7 +1265,7 @@ namespace IWCCadToolsV9.UI
                 AllowUserToDeleteRows = false,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false,
+                MultiSelect = true,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
             grid.Columns.Add("ItemNo", "No");
@@ -1291,6 +1286,15 @@ namespace IWCCadToolsV9.UI
                 }
             }
 
+            var help = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 28,
+                Text = "Select one or more rows, then click Associate. Use Ctrl/Shift to select multiple items.",
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(8, 0, 0, 0)
+            };
+
             var buttons = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom,
@@ -1302,18 +1306,46 @@ namespace IWCCadToolsV9.UI
             var cancel = new Button { Text = "Cancel", Width = 90, DialogResult = DialogResult.Cancel };
             buttons.Controls.AddRange(new Control[] { ok, cancel });
             frm.Controls.Add(grid);
+            frm.Controls.Add(help);
             frm.Controls.Add(buttons);
             frm.AcceptButton = ok;
             frm.CancelButton = cancel;
 
-            grid.CellDoubleClick += (_, e) => { if (e.RowIndex >= 0) frm.DialogResult = DialogResult.OK; };
+            grid.CellDoubleClick += (_, e) =>
+            {
+                if (e.RowIndex >= 0)
+                {
+                    grid.ClearSelection();
+                    grid.Rows[e.RowIndex].Selected = true;
+                    grid.CurrentCell = grid.Rows[e.RowIndex].Cells[0];
+                    frm.DialogResult = DialogResult.OK;
+                }
+            };
 
-            if (frm.ShowDialog() != DialogResult.OK || grid.CurrentRow == null)
-                return null;
+            if (frm.ShowDialog() != DialogResult.OK)
+                return new List<(int Id, string No, string Description)>();
 
-            return ((int)(grid.CurrentRow.Tag ?? 0),
-                    grid.CurrentRow.Cells["ItemNo"].Value?.ToString() ?? string.Empty,
-                    grid.CurrentRow.Cells["ItemDesc"].Value?.ToString() ?? string.Empty);
+            var rows = grid.SelectedRows
+                .Cast<DataGridViewRow>()
+                .OrderBy(r => r.Index)
+                .ToList();
+
+            if (rows.Count == 0 && grid.CurrentRow != null)
+                rows.Add(grid.CurrentRow);
+
+            var selected = new List<(int Id, string No, string Description)>();
+            foreach (var row in rows)
+            {
+                int id = row.Tag is int rowId ? rowId : 0;
+                if (id <= 0) continue;
+
+                selected.Add((
+                    id,
+                    row.Cells["ItemNo"].Value?.ToString() ?? string.Empty,
+                    row.Cells["ItemDesc"].Value?.ToString() ?? string.Empty));
+            }
+
+            return selected;
         }
 
         private static long? PromptForBomQty(string itemNo, string itemDesc, string dashNum, out bool cancelled)

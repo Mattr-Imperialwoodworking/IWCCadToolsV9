@@ -335,7 +335,15 @@ namespace IWCCadToolsV9.UI
         {
             // ---- Controls --------------------------------------------------------
             txtMatNo    = new TextBox { Dock = DockStyle.Fill };
-            txtMatDesc  = new TextBox { Dock = DockStyle.Fill };
+            txtMatDesc  = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                AcceptsReturn = true,
+                AcceptsTab = false,
+                WordWrap = true
+            };
             cboMatGroup = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             txtMatUnits = new TextBox { Dock = DockStyle.Fill };
 
@@ -373,10 +381,10 @@ namespace IWCCadToolsV9.UI
             };
             tblBasic.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
             tblBasic.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Material No
+            tblBasic.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // Description
+            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Material Group
+            tblBasic.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Units
 
             void AddBasic(int row, string lbl, Control ctl)
             {
