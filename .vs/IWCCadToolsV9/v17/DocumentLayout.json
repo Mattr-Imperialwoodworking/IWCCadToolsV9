@@ -28,10 +28,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\ui\\frmprojecthardwareeditor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\frmprojecthardwareeditor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\ui\\frmprojecthardwareeditor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
-      "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\frmprojecthardwareeditor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
     }
   ],
   "DocumentGroupContainers": [
@@ -69,12 +65,12 @@
               "Title": "CommandLineService.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
               "RelativeDocumentMoniker": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
-              "ToolTip": "C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs [Read Only]",
-              "RelativeToolTip": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs [Read Only]",
-              "ViewState": "AgIAAK0CAAAAAAAAAAAIwL4CAAAEAAAAAQAAAA==",
+              "ToolTip": "C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
+              "RelativeToolTip": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
+              "ViewState": "AgIAAMUCAAAAAAAAAAAAwMoCAAAcAAAAAQAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-06-05T18:38:32.659Z",
-              "EditorCaption": " [Read Only]"
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -86,8 +82,7 @@
               "RelativeToolTip": "Helpers\\LayerCommands.cs",
               "ViewState": "AgIAAKQBAAAAAAAAAAA0wLgBAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-05T18:25:13.367Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-06-05T18:25:13.367Z"
             },
             {
               "$type": "Document",
@@ -135,8 +130,7 @@
               "RelativeToolTip": "UI\\CtlIWCProj.cs",
               "ViewState": "AgIAAFwKAAAAAAAAAAA6wG8KAAAZAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-05T08:10:36.042Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-06-05T08:10:36.042Z"
             },
             {
               "$type": "Document",
@@ -148,19 +142,7 @@
               "RelativeToolTip": "UI\\FrmProjectHardwareEditor.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-05T07:27:50.457Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 7,
-              "Title": "FrmProjectHardwareEditor.cs [Design]",
-              "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\FrmProjectHardwareEditor.cs",
-              "RelativeDocumentMoniker": "UI\\FrmProjectHardwareEditor.cs",
-              "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\FrmProjectHardwareEditor.cs [Design]",
-              "RelativeToolTip": "UI\\FrmProjectHardwareEditor.cs [Design]",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-05T07:27:38.712Z"
+              "WhenOpened": "2026-06-05T07:27:50.457Z"
             }
           ]
         }

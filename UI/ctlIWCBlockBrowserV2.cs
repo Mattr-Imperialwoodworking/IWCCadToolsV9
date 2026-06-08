@@ -883,6 +883,12 @@ namespace IWCCadToolsV9.UI
             string tempPath = System.IO.Path.Combine(tempDir, $"{desiredName}_{ai.Id}.dwg");
             System.IO.File.WriteAllBytes(tempPath, ai.FileDataBytes);
 
+            // Track whether we inserted a dynamic block so we can REGEN after the lock releases.
+            // A BlockReference created via the managed API against a dynamic base BTR points to
+            // the named base BTR until AutoCAD's graph evaluator assigns it to a per-instance
+            // anonymous *Uxx variant — which only happens on REGEN.
+            bool insertedDynamicBlock = false;
+
             using (doc.LockDocument())
             {
                 // Pick insertion point
@@ -940,7 +946,7 @@ namespace IWCCadToolsV9.UI
                         int fixedCount = AttributeFieldHelper.ResyncAllBlockReferences(db, desiredName, removeOrphaned: false);
                         ed.WriteMessage($"\nSynchronized attributes on {fixedCount} reference(s).");
                     }
-                    // else Keep: do not import — we’ll just insert the existing definition
+                    // else Keep: do not import — we'll just insert the existing definition
                 }
                 else
                 {
@@ -1011,6 +1017,15 @@ namespace IWCCadToolsV9.UI
                             EnsureAnnotativeScaleOn(br, db, "1:1");
                         }
                         AttributeFieldHelper.InitializeAttributesOnInsert(tr2, br);
+
+                        // Check whether this is a dynamic block so we know to REGEN after insert
+                        try
+                        {
+                            var btrCheck = (Autodesk.AutoCAD.DatabaseServices.BlockTableRecord)
+                                           tr2.GetObject(btrId, OpenMode.ForRead);
+                            insertedDynamicBlock = btrCheck.IsDynamicBlock;
+                        }
+                        catch { }
                     }
 
 
@@ -1021,8 +1036,17 @@ namespace IWCCadToolsV9.UI
                 ed.WriteMessage($"\nInserted '{desiredName}'.");
             }
 
+            // For dynamic blocks, the BlockReference inserted above points to the named base
+            // BTR until AutoCAD's dynamic block graph evaluator runs and assigns it to a
+            // per-instance anonymous *Uxx variant.  That evaluation only happens during REGEN.
+            // Without this, visibility state changes have no visible effect (no geometry shown).
+            // SendStringToExecute must be called OUTSIDE the document lock.
+            if (insertedDynamicBlock)
+                doc.SendStringToExecute("_.REGEN\n", true, false, false);
+
             try { System.IO.File.Delete(tempPath); } catch { /* ignore */ }
         }
+
 
         /// Replace the binary content of an existing DWG asset using current selection.
         /// - If exactly one BlockReference is selected, exports its *definition as-is* (dynamic-safe) for bytes
@@ -4636,13 +4660,18 @@ namespace IWCCadToolsV9.UI
             // We'll collect all definitions to clone here
             var defsToClone = new Autodesk.AutoCAD.DatabaseServices.ObjectIdCollection();
 
-            // We'll also snapshot any Model Space composition so we can rebuild it into a new definition if needed
-            //var msSnapshots = new System.Collections.Generic.List<(string Name, Autodesk.AutoCAD.Geometry.Point3d Pos, Autodesk.AutoCAD.Geometry.Scale3d Scale, double Rot, Autodesk.AutoCAD.Geometry.Vector3d Normal)>();
+            // We'll also snapshot any Model Space composition so we can rebuild it into a new definition if needed.
+            // Keep the actual Model Space entity ids as well. Some uploaded assembly DWGs contain
+            // raw linework/arcs plus one nested block reference. If we only look at the single
+            // nested BlockReference, AutoCAD can end up inserting that nested child (for example,
+            // a screw) instead of the full uploaded assembly.
             var msSnapshots = new System.Collections.Generic.List<ModelRefSnapshot>();
+            var msEntityIds = new Autodesk.AutoCAD.DatabaseServices.ObjectIdCollection();
 
             // Try to pick a reasonable root definition (by desiredName, file stem, or a heuristic)
             Autodesk.AutoCAD.DatabaseServices.ObjectId rootBtrId = Autodesk.AutoCAD.DatabaseServices.ObjectId.Null;
             string? rootName = null;
+            bool sourceHadDesiredName = false;
 
             using (var tr = srcDb.TransactionManager.StartTransaction())
             {
@@ -4654,6 +4683,7 @@ namespace IWCCadToolsV9.UI
                 {
                     rootBtrId = sbt[desiredName];
                     rootName = desiredName;
+                    sourceHadDesiredName = true;
                 }
                 else
                 {
@@ -4699,7 +4729,14 @@ namespace IWCCadToolsV9.UI
                 _ = false; // placeholder
                 foreach (Autodesk.AutoCAD.DatabaseServices.ObjectId entId in ms)
                 {
-                    if (tr.GetObject(entId, OpenMode.ForRead) is Autodesk.AutoCAD.DatabaseServices.BlockReference br)
+                    if (tr.GetObject(entId, OpenMode.ForRead) is not Autodesk.AutoCAD.DatabaseServices.Entity ent)
+                        continue;
+
+                    // Preserve every top-level Model Space entity so a DWG saved as a drawing
+                    // composition imports as the same composition, not as the first nested block.
+                    msEntityIds.Add(entId);
+
+                    if (ent is Autodesk.AutoCAD.DatabaseServices.BlockReference br)
                     {
 
                         string? defName = null;
@@ -4764,51 +4801,46 @@ namespace IWCCadToolsV9.UI
             }
 
             // 5) Ensure a top definition with 'desiredName' exists in destination.
+            Autodesk.AutoCAD.DatabaseServices.ObjectId modelSpaceWrapperId = Autodesk.AutoCAD.DatabaseServices.ObjectId.Null;
+            bool cloneModelSpaceIntoWrapper = false;
+
             using var trd = destDb.TransactionManager.StartTransaction();
             var bt = (Autodesk.AutoCAD.DatabaseServices.BlockTable)
                      trd.GetObject(destDb.BlockTableId, Autodesk.AutoCAD.DatabaseServices.OpenMode.ForRead);
 
             bool hasDesired = bt.Has(desiredName);
 
-            // CASE A: exactly one model-space ref in source -> rename that imported child to desiredName
-            if (!hasDesired && msSnapshots.Count == 1)
+            // If the source DWG did not actually contain a BTR named desiredName, Replace mode
+            // cannot redefine that name via WblockCloneObjects. Move the old destination definition
+            // aside so we can recreate desiredName from the uploaded source Model Space composition.
+            if (!sourceHadDesiredName &&
+                hasDesired &&
+                drcMode == Autodesk.AutoCAD.DatabaseServices.DuplicateRecordCloning.Replace &&
+                msEntityIds.Count > 0)
             {
-                var snap = msSnapshots[0];
-
-                // Prefer the dynamic base (stable, non-anonymous). Fallback to the ref'd def name.
-                string candidate = !string.IsNullOrWhiteSpace(snap.DynamicBaseName) && !snap.DynamicBaseName.StartsWith("*")
-                                   ? snap.DynamicBaseName
-                                   : snap.DefName;
-
-                if (!string.IsNullOrWhiteSpace(candidate) && bt.Has(candidate))
-                {
-                    // If desiredName already exists and we're in Replace mode, move it out of the way first
-                    if (bt.Has(desiredName))
-                    {
-                        if (drcMode == Autodesk.AutoCAD.DatabaseServices.DuplicateRecordCloning.Ignore)
-                        {
-                            // honor Ignore: leave existing and do nothing; caller inserts existing desiredName
-                        }
-                        else
-                        {
-                            var oldId = bt[desiredName];
-                            var oldBtr = (Autodesk.AutoCAD.DatabaseServices.BlockTableRecord)
-                                         trd.GetObject(oldId, Autodesk.AutoCAD.DatabaseServices.OpenMode.ForWrite);
-                            oldBtr.Name = $"{desiredName}._IWC_OLD_{Guid.NewGuid():N}".Replace(":", "_");
-                        }
-                    }
-
-                    // Rename candidate to desiredName (this makes InsertDwgAsset work without wrappers)
-                    bt.UpgradeOpen();
-                    var candId = bt[candidate];
-                    var btrw = (Autodesk.AutoCAD.DatabaseServices.BlockTableRecord)
-                                 trd.GetObject(candId, Autodesk.AutoCAD.DatabaseServices.OpenMode.ForWrite);
-                    btrw.Name = desiredName;
-                    hasDesired = true;
-                }
+                var oldId = bt[desiredName];
+                var oldBtr = (Autodesk.AutoCAD.DatabaseServices.BlockTableRecord)
+                             trd.GetObject(oldId, Autodesk.AutoCAD.DatabaseServices.OpenMode.ForWrite);
+                oldBtr.Name = $"{desiredName}._IWC_OLD_{Guid.NewGuid():N}".Replace(":", "_");
+                hasDesired = false;
             }
 
-            // CASE B: multiple model-space refs or CASE A failed -> build wrapper definition
+            // Preferred fallback: clone the full source Model Space into a new definition named
+            // desiredName. This preserves raw geometry plus nested block references. Do NOT rename
+            // a single nested Model Space block reference to desiredName; that was the cause of
+            // assemblies inserting as an internal child block such as a screw.
+            if (!hasDesired && msEntityIds.Count > 0)
+            {
+                bt.UpgradeOpen();
+                var newDef = new Autodesk.AutoCAD.DatabaseServices.BlockTableRecord { Name = desiredName };
+                modelSpaceWrapperId = bt.Add(newDef);
+                trd.AddNewlyCreatedDBObject(newDef, true);
+                hasDesired = true;
+                cloneModelSpaceIntoWrapper = true;
+            }
+
+            // Last resort: if the source Model Space did not contain cloneable entities but did
+            // expose BlockReference snapshots, build a wrapper from those references.
             if (!hasDesired && msSnapshots.Count > 0)
             {
                 bt.UpgradeOpen();
@@ -4818,8 +4850,7 @@ namespace IWCCadToolsV9.UI
 
                 foreach (var snap in msSnapshots)
                 {
-                    // choose the child def to reference: prefer dynamic base if available
-                    string childName = !string.IsNullOrWhiteSpace(snap.DynamicBaseName) && bt.Has(snap.DynamicBaseName)
+                    string? childName = !string.IsNullOrWhiteSpace(snap.DynamicBaseName) && bt.Has(snap.DynamicBaseName)
                                        ? snap.DynamicBaseName
                                        : snap.DefName;
 
@@ -4840,6 +4871,17 @@ namespace IWCCadToolsV9.UI
             }
 
             trd.Commit();
+
+            if (cloneModelSpaceIntoWrapper && !modelSpaceWrapperId.IsNull)
+            {
+                var mapMs = new Autodesk.AutoCAD.DatabaseServices.IdMapping();
+                srcDb.WblockCloneObjects(
+                    msEntityIds,
+                    modelSpaceWrapperId,
+                    mapMs,
+                    Autodesk.AutoCAD.DatabaseServices.DuplicateRecordCloning.Ignore,
+                    false);
+            }
 
         }
 

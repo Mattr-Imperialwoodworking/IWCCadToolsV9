@@ -465,35 +465,169 @@ namespace IWCCadToolsV9.Helpers
             WblockToFile(db, ids[0], basePt, filePath);
         }
 
-        /// <summary>Creates a standalone DWG file containing the block definition + a reference.</summary>
+        /// <summary>
+        /// Creates a standalone DWG file containing the block definition and all its
+        /// dependencies, including anonymous *Uxx variant BTRs required by dynamic blocks
+        /// with visibility states.
+        ///
+        /// IMPORTANT — why db.Wblock() is NOT used here:
+        ///   Database.Wblock(Database, ObjectIdCollection, ...) silently drops the
+        ///   anonymous *Uxx variant BlockTableRecords that hold per-state geometry for
+        ///   dynamic blocks.  Those variants are not reachable by following
+        ///   BlockReference entity links inside the named BTR — they are attached via
+        ///   the dynamic block's internal action/parameter table and returned only by
+        ///   BlockTableRecord.GetAnonymousBlockIds().
+        ///
+        ///   The fix: build the full closure explicitly (named BTR + all anonymous
+        ///   variants + all nested child BTRs, recursively) and hand the whole set to
+        ///   WblockCloneObjects.  This preserves visibility state geometry through the
+        ///   upload/download round-trip.
+        /// </summary>
         public static void WblockToFile(Database db, ObjectId btrId, Point3d basePt, string filePath)
         {
-            using var newDb = new Database(true, false);
-            db.Wblock(newDb, new ObjectIdCollection { btrId }, basePt, DuplicateRecordCloning.Ignore);
+            // 1. Build the full closure — named BTR + anonymous variants + nested children
+            ObjectIdCollection closure;
+            string rootName;
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var rootBtr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+                rootName = rootBtr.Name;
+                closure  = BuildDynamicBlockClosure(db, btrId, tr);
+                tr.Commit();
+            }
 
-            // Insert a block reference in the new drawing's model space
+            // 2. Clone the entire closure into a fresh destination database
+            using var newDb = new Database(true, false);
+            var idMap = new IdMapping();
+            db.WblockCloneObjects(closure, newDb.BlockTableId, idMap, DuplicateRecordCloning.Ignore, false);
+
+            // 3. Set the origin on the cloned root BTR and add a Model Space reference
             using (var tr = newDb.TransactionManager.StartTransaction())
             {
-                var bt  = (BlockTable)tr.GetObject(newDb.BlockTableId, OpenMode.ForRead);
-                var btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                var bt = (BlockTable)tr.GetObject(newDb.BlockTableId, OpenMode.ForRead);
 
-                // Find the cloned block definition by its origin point (any non-layout, non-modelspace block)
-                foreach (ObjectId id in bt)
+                // Locate the cloned root BTR by name (idMap lookup is cleaner but
+                // requires the source id to still be valid; name lookup is always safe)
+                if (bt.Has(rootName))
                 {
-                    var b = (BlockTableRecord)tr.GetObject(id, OpenMode.ForRead);
-                    if (!b.IsLayout && b.Name != BlockTableRecord.ModelSpace
-                        && b.Name != BlockTableRecord.PaperSpace)
-                    {
-                        using var br = new BlockReference(basePt, id);
-                        btr.AppendEntity(br);
-                        tr.AddNewlyCreatedDBObject(br, true);
-                        break;
-                    }
+                    var rootBtr = (BlockTableRecord)tr.GetObject(bt[rootName], OpenMode.ForWrite);
+                    rootBtr.Origin = basePt;
+
+                    // Insert a model-space reference so ImportBlockDefinitionFromFile's
+                    // "scan model space for refs" path can find it
+                    var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                    using var br = new BlockReference(basePt, bt[rootName]);
+                    ms.AppendEntity(br);
+                    tr.AddNewlyCreatedDBObject(br, true);
                 }
+
                 tr.Commit();
             }
 
             newDb.SaveAs(filePath, DwgVersion.Current);
+        }
+
+        /// <summary>
+        /// Returns the complete set of BlockTableRecord ObjectIds needed to fully
+        /// represent a block definition, including:
+        ///   – The root BTR itself
+        ///   – All anonymous *Uxx variant BTRs (dynamic block visibility states)
+        ///   – All nested named child BTRs referenced from the above, recursively
+        ///
+        /// This closure is what WblockCloneObjects needs to receive so that dynamic
+        /// block visibility state geometry survives the export round-trip.
+        /// </summary>
+        public static ObjectIdCollection BuildDynamicBlockClosure(
+            Database    db,
+            ObjectId    rootBtrId,
+            Transaction tr)
+        {
+            var result = new ObjectIdCollection();
+            var seen   = new HashSet<ObjectId>();
+            var stack  = new Stack<ObjectId>();
+
+            if (rootBtrId.IsNull) return result;
+            stack.Push(rootBtrId);
+
+            while (stack.Count > 0)
+            {
+                var id = stack.Pop();
+                if (id.IsNull || !seen.Add(id)) continue;
+
+                BlockTableRecord btr;
+                try { btr = (BlockTableRecord)tr.GetObject(id, OpenMode.ForRead); }
+                catch { continue; }
+
+                if (btr.IsLayout) continue;
+                result.Add(id);
+
+                // Dynamic block: pull in every anonymous *Uxx variant BTR.
+                // These carry the per-visibility-state geometry and are NOT reached
+                // by walking BlockReference links inside the named BTR.
+                if (btr.IsDynamicBlock)
+                {
+                    foreach (var anonId in GetAnonymousBlockIdsCompat(btr))
+                        if (!anonId.IsNull && !seen.Contains(anonId))
+                            stack.Push(anonId);
+                }
+
+                // Walk every nested BlockReference to collect child definitions
+                foreach (ObjectId entId in btr)
+                {
+                    try
+                    {
+                        if (tr.GetObject(entId, OpenMode.ForRead) is not BlockReference nbr) continue;
+
+                        if (!nbr.BlockTableRecord.IsNull && !seen.Contains(nbr.BlockTableRecord))
+                            stack.Push(nbr.BlockTableRecord);
+
+                        try
+                        {
+                            if (!nbr.DynamicBlockTableRecord.IsNull
+                                && !seen.Contains(nbr.DynamicBlockTableRecord))
+                                stack.Push(nbr.DynamicBlockTableRecord);
+                        }
+                        catch { /* older API versions */ }
+                    }
+                    catch { }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Returns the anonymous variant BTR ids for a dynamic block definition.
+        /// Handles both AutoCAD API signatures:
+        ///   – ObjectIdCollection GetAnonymousBlockIds()   (2021+)
+        ///   – void GetAnonymousBlockIds(ObjectIdCollection) (older)
+        /// </summary>
+        private static IEnumerable<ObjectId> GetAnonymousBlockIdsCompat(BlockTableRecord btr)
+        {
+            var results = new List<ObjectId>();
+            try
+            {
+                var t = typeof(BlockTableRecord);
+
+                var miNoArgs = t.GetMethod("GetAnonymousBlockIds", Type.EmptyTypes);
+                if (miNoArgs?.ReturnType == typeof(ObjectIdCollection))
+                {
+                    var col = miNoArgs.Invoke(btr, null) as ObjectIdCollection;
+                    if (col != null) foreach (ObjectId id in col) results.Add(id);
+                    return results;
+                }
+
+                var miOneArg = t.GetMethod("GetAnonymousBlockIds",
+                                           new[] { typeof(ObjectIdCollection) });
+                if (miOneArg != null)
+                {
+                    var col = new ObjectIdCollection();
+                    miOneArg.Invoke(btr, new object[] { col });
+                    foreach (ObjectId id in col) results.Add(id);
+                }
+            }
+            catch { }
+            return results;
         }
 
         // ---------------------------------------------------------------------------
@@ -550,15 +684,15 @@ namespace IWCCadToolsV9.Helpers
         /// Imports the named block definition from <paramref name="sourceDwgPath"/> into
         /// <paramref name="destDb"/> using WblockCloneObjects with Replace semantics.
         ///
-        /// Returns <c>true</c> on success.  The caller should follow this with
-        /// <see cref="AttributeFieldHelper.PatchFieldsFromSource"/> to restore any
-        /// AttributeDefinition Field objects, which WblockCloneObjects silently drops
-        /// when the destination BTR already exists (documented AutoCAD limitation).
+        /// The full definition closure is cloned — named BTR + all anonymous *Uxx
+        /// variant BTRs (dynamic block visibility states) + all nested child BTRs.
+        /// Passing only the root BTR id to WblockCloneObjects would strip the anonymous
+        /// variants, breaking visibility states on re-insert.
         ///
-        /// We use WblockCloneObjects rather than Database.Insert because Insert throws
-        /// eSelfReference when the source DWG already contains a definition with the
-        /// target name — which is the normal case here, since IWC blocks are stored
-        /// under their canonical block name in both the file and the database.
+        /// Returns <c>true</c> on success.  The caller should follow with
+        /// <see cref="AttributeFieldHelper.PatchFieldsFromSource"/> to restore any
+        /// AttributeDefinition Field objects that WblockCloneObjects silently drops
+        /// when the destination BTR already exists (documented AutoCAD limitation).
         /// </summary>
         private static bool ImportBlockViaWblockClone(Database destDb, string sourceDwgPath, string blockName)
         {
@@ -568,45 +702,45 @@ namespace IWCCadToolsV9.Helpers
                 srcDb.ReadDwgFile(sourceDwgPath, FileShare.Read, true, null);
                 srcDb.CloseInput(true);
 
-                // Locate the source definition.  Prefer an exact name match; fall back
-                // to the file-stem name (Wblock often stores blocks under that name).
-                ObjectIdCollection idsToClone;
+                ObjectId srcRootId = ObjectId.Null;
+                ObjectIdCollection closure;
+
                 using (var trSrc = srcDb.TransactionManager.StartTransaction())
                 {
                     var sbt = (BlockTable)trSrc.GetObject(srcDb.BlockTableId, OpenMode.ForRead);
-                    ObjectId srcId = ObjectId.Null;
 
+                    // Prefer exact name match, then file stem, then first non-layout non-anon BTR
                     if (sbt.Has(blockName))
-                        srcId = sbt[blockName];
+                    {
+                        srcRootId = sbt[blockName];
+                    }
                     else
                     {
                         var stem = Path.GetFileNameWithoutExtension(sourceDwgPath) ?? string.Empty;
                         if (sbt.Has(stem))
-                            srcId = sbt[stem];
+                            srcRootId = sbt[stem];
                     }
 
-                    // Final fallback: first non-layout, non-anonymous BTR.
-                    if (srcId.IsNull)
+                    if (srcRootId.IsNull)
                     {
                         foreach (ObjectId id in sbt)
                         {
                             var b = (BlockTableRecord)trSrc.GetObject(id, OpenMode.ForRead);
-                            if (b.IsLayout) continue;
-                            if (b.Name.StartsWith("*", StringComparison.Ordinal)) continue;
-                            srcId = id; break;
+                            if (b.IsLayout || b.Name.StartsWith("*", StringComparison.Ordinal)) continue;
+                            srcRootId = id; break;
                         }
                     }
 
-                    if (srcId.IsNull) { trSrc.Commit(); return false; }
-                    idsToClone = new ObjectIdCollection { srcId };
+                    if (srcRootId.IsNull) { trSrc.Commit(); return false; }
+
+                    // Build full closure: named BTR + anonymous *Uxx variants + nested children
+                    closure = BuildDynamicBlockClosure(srcDb, srcRootId, trSrc);
                     trSrc.Commit();
                 }
 
-                // WblockCloneObjects with Replace silently handles same-named existing
-                // BTRs in destDb (no eSelfReference).  ExtensionDictionary contents are
-                // NOT copied — the caller must follow with PatchFieldsFromSource.
+                // Clone everything — Replace handles same-named existing BTRs without eSelfReference
                 srcDb.WblockCloneObjects(
-                    idsToClone,
+                    closure,
                     destDb.BlockTableId,
                     new IdMapping(),
                     DuplicateRecordCloning.Replace,
