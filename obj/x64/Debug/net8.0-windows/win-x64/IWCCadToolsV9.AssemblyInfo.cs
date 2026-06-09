@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("IWCCadToolsV9")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d526b44faebbf6d6ad274dad6d68414ee138bddd")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b54b650e380f54ab62a9d0fad744330557d089d5")]
 [assembly: System.Reflection.AssemblyProductAttribute("IWCCadToolsV9")]
 [assembly: System.Reflection.AssemblyTitleAttribute("IWCCadToolsV9")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

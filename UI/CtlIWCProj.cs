@@ -2084,12 +2084,62 @@ namespace IWCCadToolsV9.UI
             => SaveProjectDashDetails();
 
         // -----------------------------------------------------------------------
+        // Top sheet tab styling
+        // -----------------------------------------------------------------------
+
+        private void ConfigureTopSheetTabs()
+        {
+            // Keep the tab page content on the normal inherited font, but owner-draw
+            // the top sheet tab captions so only the tab headers are bold.
+            tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabControl.Padding = new Point(10, 4);
+            tabControl.DrawItem -= TabControl_DrawItem;
+            tabControl.DrawItem += TabControl_DrawItem;
+        }
+
+        private void TabControl_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (sender is not TabControl tabs || e.Index < 0 || e.Index >= tabs.TabPages.Count)
+                return;
+
+            TabPage page = tabs.TabPages[e.Index];
+            Rectangle tabBounds = tabs.GetTabRect(e.Index);
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+
+            Color backColor = selected ? SystemColors.Window : SystemColors.Control;
+            Color borderColor = selected ? SystemColors.ControlDark : SystemColors.ControlLight;
+
+            using (var backBrush = new SolidBrush(backColor))
+                e.Graphics.FillRectangle(backBrush, tabBounds);
+
+            using (var boldFont = new Font(tabs.Font, FontStyle.Bold))
+            {
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    page.Text,
+                    boldFont,
+                    tabBounds,
+                    tabs.Enabled ? SystemColors.ControlText : SystemColors.GrayText,
+                    TextFormatFlags.HorizontalCenter |
+                    TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine |
+                    TextFormatFlags.EndEllipsis |
+                    TextFormatFlags.NoPrefix);
+            }
+
+            ControlPaint.DrawBorder(e.Graphics, tabBounds, borderColor, ButtonBorderStyle.Solid);
+            e.DrawFocusRectangle();
+        }
+
+        // -----------------------------------------------------------------------
         // Designer-generated members (unchanged from original)
         // -----------------------------------------------------------------------
 
         private void InitializeComponent()
         {
             tabControl   = new TabControl();
+            ConfigureTopSheetTabs();
+
             var tabProj  = new TabPage("Current Project");
             var tabBom   = new TabPage("Current BOM");
             var tabFile  = new TabPage("File Properties");
