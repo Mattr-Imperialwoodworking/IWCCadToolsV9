@@ -285,7 +285,8 @@ namespace IWCCadToolsV9.UI
 
             // grpDetails
             this.grpDetails = new System.Windows.Forms.GroupBox();
-            this.grpDetails.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.grpDetails.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+                | System.Windows.Forms.AnchorStyles.Left)
                 | System.Windows.Forms.AnchorStyles.Right)));
             this.grpDetails.Location = new System.Drawing.Point(8, 300);   // below preview image
             this.grpDetails.Name = "grpDetails";
@@ -352,7 +353,8 @@ namespace IWCCadToolsV9.UI
             this.txtDetDesc.Size = new System.Drawing.Size(234, 60);
 
             this.txtDetNotes = new System.Windows.Forms.TextBox();
-            this.txtDetNotes.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtDetNotes.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+                | System.Windows.Forms.AnchorStyles.Left)
                 | System.Windows.Forms.AnchorStyles.Right)));
             this.txtDetNotes.Location = new System.Drawing.Point(13, 184);
             this.txtDetNotes.Multiline = true;
@@ -374,6 +376,8 @@ namespace IWCCadToolsV9.UI
 
             // add grpDetails to previewPanel
             this.previewPanel.Controls.Add(this.grpDetails);
+            this.previewPanel.Resize += PreviewPanel_ResizeDetailsArea;
+            PreviewPanel_ResizeDetailsArea(this.previewPanel, System.EventArgs.Empty);
 
             // 
             // ctlIWCBlockBrowserV2
@@ -393,5 +397,18 @@ namespace IWCCadToolsV9.UI
             ((System.ComponentModel.ISupportInitialize)picturePreview).EndInit();
             ResumeLayout(false);
         }
+
+        private void PreviewPanel_ResizeDetailsArea(object sender, System.EventArgs e)
+        {
+            if (previewPanel == null || grpDetails == null || txtDetNotes == null)
+                return;
+
+            int detailHeight = previewPanel.ClientSize.Height - grpDetails.Top - 8;
+            grpDetails.Height = System.Math.Max(250, detailHeight);
+
+            int notesHeight = grpDetails.ClientSize.Height - txtDetNotes.Top - 10;
+            txtDetNotes.Height = System.Math.Max(56, notesHeight);
+        }
+
     }
 }

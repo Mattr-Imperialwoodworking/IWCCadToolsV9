@@ -229,6 +229,142 @@ namespace IWCCadToolsV9.Core
         }
 
 
+
+
+        public static void ReviewLoggedSheetsAfterProjectDashChange(Document doc, int? previousDashId, int newProjectId, int newDashId)
+        {
+            if (doc == null || !DrawingSeriesAcadHelper.ActiveDocumentHasUsablePath())
+                return;
+
+            try
+            {
+                var sheetIds = DrawingSeriesAcadHelper.GetLoggedSheetIdsFromLayouts(doc);
+                if (sheetIds.Count == 0)
+                    return;
+
+                var repo = new DrawingSeriesRepository();
+                var logged = repo.GetLoggedSheetLinksBySheetIdsAsync(sheetIds).GetAwaiter().GetResult();
+                if (logged.Count == 0)
+                    return;
+
+                var loggedToPreviousDash = logged
+                    .Where(x => x.SheetId > 0 &&
+                                (!previousDashId.HasValue || !x.DashId.HasValue || x.DashId.Value != newDashId))
+                    .GroupBy(x => x.SheetId)
+                    .Select(g => g.First())
+                    .ToList();
+
+                if (loggedToPreviousDash.Count == 0)
+                    return;
+
+                string preview = string.Join(Environment.NewLine,
+                    loggedToPreviousDash.Take(12).Select(s =>
+                        $"  • {s.SheetNumber} - {s.SheetSubject}  ({s.LayoutName})"));
+                if (loggedToPreviousDash.Count > 12)
+                    preview += Environment.NewLine + $"  ...and {loggedToPreviousDash.Count - 12:N0} more";
+
+                var result = MessageBox.Show(
+                    "There are logged sheets to the previous dash number in this file. Do you want to delete the sheet associations or update with the new dash number?" +
+                    Environment.NewLine + Environment.NewLine +
+                    "Click Yes to update the logged sheets/files to the new dash number." + Environment.NewLine +
+                    "Click No to delete the sheet associations and start clean." + Environment.NewLine +
+                    "Click Cancel to leave the existing Drawing Series records unchanged." +
+                    Environment.NewLine + Environment.NewLine + preview,
+                    "IWC Drawing Series", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    repo.UpdateLoggedFilesToDashAsync(loggedToPreviousDash.Select(s => s.SheetId), newProjectId, newDashId, doc.Name)
+                        .GetAwaiter().GetResult();
+
+                    int? fileId = DrawingSeriesAcadHelper.ReadFileIdFromDwg();
+                    if (!fileId.HasValue || fileId.Value <= 0)
+                    {
+                        fileId = loggedToPreviousDash.Select(s => s.FileId).FirstOrDefault(id => id > 0);
+                        if (fileId.HasValue && fileId.Value > 0)
+                            DrawingSeriesAcadHelper.WriteFileIdToDwg(fileId.Value);
+                    }
+
+                    RaiseDrawingSeriesDataChanged();
+                    doc.Editor.WriteMessage("\nIWC: Drawing Series sheet/file associations updated to the new dash.\n");
+                }
+                else if (result == DialogResult.No)
+                {
+                    repo.DeleteLoggedSheetAssociationsAsync(loggedToPreviousDash.Select(s => s.SheetId), deleteOrphanFiles: true)
+                        .GetAwaiter().GetResult();
+                    DrawingSeriesAcadHelper.ClearDrawingSeriesXData(doc);
+                    DrawingSeriesAcadHelper.ClearFileIdFromDwg();
+                    RaiseDrawingSeriesDataChanged();
+                    doc.Editor.WriteMessage("\nIWC: Drawing Series sheet associations deleted from this drawing and database.\n");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                doc.Editor.WriteMessage($"\nIWC: Drawing Series project/dash change review failed — {ex.Message}\n");
+            }
+        }
+
+        public static void ReviewSaveAsPathChange(Document doc, ProjectContextService? svc, string? previousFullPath)
+        {
+            if (doc == null || !DrawingSeriesAcadHelper.ActiveDocumentHasUsablePath())
+                return;
+
+            try
+            {
+                string currentPath = doc.Name ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(previousFullPath) ||
+                    string.Equals(previousFullPath, currentPath, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var sheetIds = DrawingSeriesAcadHelper.GetLoggedSheetIdsFromLayouts(doc);
+                if (sheetIds.Count == 0)
+                    return;
+
+                var repo = new DrawingSeriesRepository();
+                var logged = repo.GetLoggedSheetLinksBySheetIdsAsync(sheetIds).GetAwaiter().GetResult();
+                if (logged.Count == 0)
+                    return;
+
+                int fileId = DrawingSeriesAcadHelper.ReadFileIdFromDwg() ?? logged.Select(x => x.FileId).FirstOrDefault(id => id > 0);
+                if (fileId <= 0)
+                    return;
+
+                var result = MessageBox.Show(
+                    "This drawing was saved under a different file name and contains logged Drawing Series sheets." +
+                    Environment.NewLine + Environment.NewLine +
+                    "Do you want to update the Drawing Series database to use the new file name, or delete the sheet/file associations and start clean?" +
+                    Environment.NewLine + Environment.NewLine +
+                    $"Previous file: {previousFullPath}" + Environment.NewLine +
+                    $"Current file:  {currentPath}" + Environment.NewLine + Environment.NewLine +
+                    "Click Yes to update the database file record to the new path." + Environment.NewLine +
+                    "Click No to delete Drawing Series associations from this saved-as copy." + Environment.NewLine +
+                    "Click Cancel to leave the existing Drawing Series records unchanged.",
+                    "IWC Drawing Series", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    repo.UpdateFilePathAsync(fileId, svc?.Project?.Id, currentPath).GetAwaiter().GetResult();
+                    DrawingSeriesAcadHelper.WriteFileIdToDwg(fileId);
+                    RaiseDrawingSeriesDataChanged();
+                    doc.Editor.WriteMessage("\nIWC: Drawing Series database file path updated after Save As.\n");
+                }
+                else if (result == DialogResult.No)
+                {
+                    repo.DeleteLoggedSheetAssociationsAsync(logged.Select(s => s.SheetId), deleteOrphanFiles: true)
+                        .GetAwaiter().GetResult();
+                    DrawingSeriesAcadHelper.ClearDrawingSeriesXData(doc);
+                    DrawingSeriesAcadHelper.ClearFileIdFromDwg();
+                    RaiseDrawingSeriesDataChanged();
+                    doc.Editor.WriteMessage("\nIWC: Drawing Series associations removed from saved-as copy.\n");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                doc.Editor.WriteMessage($"\nIWC: Drawing Series Save As review failed — {ex.Message}\n");
+            }
+        }
+
+
         public static void PromptToAssociateActiveDocumentIfNeeded(Document doc, ProjectContextService svc)
         {
             try

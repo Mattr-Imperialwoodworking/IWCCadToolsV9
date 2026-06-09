@@ -3,6 +3,9 @@
   "WorkspaceRootPath": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\ui\\frmprojectarchiveselector.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:ui\\frmprojectarchiveselector.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -13,9 +16,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\data\\iwcproj.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|solutionrelative:data\\iwcproj.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}|IWCCadToolsV9.csproj|c:\\users\\mattr\\source\\repos\\mattr-imperialwoodworking\\iwccadtoolsv9\\ui\\ctliwcproj.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -49,7 +49,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 5,
+          "SelectedChildIndex": 8,
           "Children": [
             {
               "$type": "Bookmark",
@@ -73,20 +73,19 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 1,
               "Title": "FrmProjectArchiveSelector.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\FrmProjectArchiveSelector.cs",
               "RelativeDocumentMoniker": "UI\\FrmProjectArchiveSelector.cs",
               "ToolTip": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\UI\\FrmProjectArchiveSelector.cs",
               "RelativeToolTip": "UI\\FrmProjectArchiveSelector.cs",
-              "ViewState": "AgIAAAcBAAAAAAAAAAAqwCYBAAAsAAAAAAAAAA==",
+              "ViewState": "AgIAAB8BAAAAAAAAAAAiwCYBAAAsAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-09T17:52:32.864Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-06-09T17:52:32.864Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 2,
               "Title": "IWCProjRepository.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\Data\\IWCProjRepository.cs",
               "RelativeDocumentMoniker": "Data\\IWCProjRepository.cs",
@@ -94,12 +93,11 @@
               "RelativeToolTip": "Data\\IWCProjRepository.cs",
               "ViewState": "AgIAACEAAAAAAAAAAAAiwCgAAAAVAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-09T17:27:34.167Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-06-09T17:27:34.167Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 3,
               "Title": "IWCProj.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\source\\repos\\Mattr-Imperialwoodworking\\IWCCadToolsV9\\Data\\IWCProj.cs",
               "RelativeDocumentMoniker": "Data\\IWCProj.cs",
@@ -107,18 +105,17 @@
               "RelativeToolTip": "Data\\IWCProj.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-06-09T17:27:22.987Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-06-09T17:27:22.987Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 0,
               "Title": "CommandLineService.cs",
               "DocumentMoniker": "C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
               "RelativeDocumentMoniker": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
               "ToolTip": "C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
               "RelativeToolTip": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
-              "ViewState": "AgIAAI4CAAAAAAAAAAAiwJUCAAADAAAAAQAAAA==",
+              "ViewState": "AgIAALECAAAAAAAAAAAqwLsCAAADAAAAAQAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-06-05T18:38:32.659Z",
               "EditorCaption": ""

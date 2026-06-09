@@ -78,6 +78,7 @@ namespace IWCCadToolsV9.Core
                 DwgPropertyStore.EnsureAllKeysExist(doc);
                 WireBeforeSaveOnce(doc, svc);
                 WireSheetEraseMonitorOnce(doc);
+                WireSaveAsMonitorOnce(doc, svc);
                 AutoUpdateExistingTablesOnce(doc);
 
                 if (svc.HasProject)
@@ -115,6 +116,7 @@ namespace IWCCadToolsV9.Core
                 DwgPropertyStore.EnsureAllKeysExist(doc);
                 WireBeforeSaveOnce(doc, svc);
                 WireSheetEraseMonitorOnce(doc);
+                WireSaveAsMonitorOnce(doc, svc);
 
                 // LoadAsync does SQL I/O — run on background thread, then return
                 // to the AutoCAD main thread before showing any modal dialogs.
@@ -240,6 +242,60 @@ namespace IWCCadToolsV9.Core
             doc.UserData[SheetEraseWireKey] = true;
         }
 
+
+
+        // -----------------------------------------------------------------------
+        // Save As monitor — AutoCAD updates Document.Name after SAVEAS completes.
+        // When a logged Drawing Series file is saved under a different path, prompt
+        // to either update the database file path or remove the copied sheet links.
+        // -----------------------------------------------------------------------
+
+        private const string SaveAsWireKey = "IWC_SaveAsMonitorWired_v1";
+        private const string LastKnownPathKey = "IWC_LastKnownFullPath_v1";
+
+        private static void WireSaveAsMonitorOnce(Document doc, ProjectContextService svc)
+        {
+            if (doc.UserData[SaveAsWireKey] is bool wired && wired)
+                return;
+
+            doc.UserData[LastKnownPathKey] = doc.Name ?? string.Empty;
+
+            doc.CommandEnded += (s, e) =>
+            {
+                try
+                {
+                    string previousPath = doc.UserData[LastKnownPathKey]?.ToString() ?? string.Empty;
+                    string currentPath = doc.Name ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(currentPath))
+                        return;
+
+                    if (!string.Equals(previousPath, currentPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Application.DocumentManager.ExecuteInApplicationContext(
+                            state =>
+                            {
+                                var tuple = (Tuple<Document, ProjectContextService, string>)state!;
+                                var monitoredDoc = tuple.Item1;
+                                var monitoredSvc = tuple.Item2;
+                                var oldPath = tuple.Item3;
+
+                                if (!object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, monitoredDoc))
+                                    Application.DocumentManager.MdiActiveDocument = monitoredDoc;
+
+                                DrawingSeriesService.ReviewSaveAsPathChange(monitoredDoc, monitoredSvc, oldPath);
+                                monitoredDoc.UserData[LastKnownPathKey] = monitoredDoc.Name ?? string.Empty;
+                            }, Tuple.Create(doc, svc, previousPath));
+                    }
+                    else
+                    {
+                        doc.UserData[LastKnownPathKey] = currentPath;
+                    }
+                }
+                catch { /* Save As monitoring is best-effort */ }
+            };
+
+            doc.UserData[SaveAsWireKey] = true;
+        }
 
         // -----------------------------------------------------------------------
         // BeforeSave — wire per-document (called from Created and Opened)

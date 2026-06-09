@@ -508,6 +508,61 @@ namespace IWCCadToolsV9.Helpers
             }
         }
 
+
+        public static IReadOnlyList<int> GetLoggedSheetIdsFromLayouts(Document doc)
+        {
+            var ids = new List<int>();
+            if (doc == null) return ids;
+
+            var db = doc.Database;
+            using (doc.LockDocument())
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var layoutDict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+                foreach (DBDictionaryEntry entry in layoutDict)
+                {
+                    var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForRead);
+                    if (layout.ModelType) continue;
+
+                    int? sheetId = ReadSheetIdFromLayoutXData(layout);
+                    if (sheetId.HasValue && sheetId.Value > 0 && !ids.Contains(sheetId.Value))
+                        ids.Add(sheetId.Value);
+                }
+                tr.Commit();
+            }
+
+            return ids;
+        }
+
+        public static void ClearDrawingSeriesXData(Document doc)
+        {
+            if (doc == null) return;
+
+            var db = doc.Database;
+            using (doc.LockDocument())
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var layoutDict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+                foreach (DBDictionaryEntry entry in layoutDict)
+                {
+                    var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForWrite);
+                    if (layout.ModelType) continue;
+
+                    if (layout.GetXDataForApplication(SheetRegAppName) != null)
+                        layout.XData = null;
+                }
+                tr.Commit();
+            }
+        }
+
+        public static void ClearFileIdFromDwg()
+        {
+            // Set to NA instead of removing the custom property; ReadFileIdFromDwg()
+            // treats non-numeric values as no file ID while preserving the expected key.
+            AcadFilePropHelper.SetCustomProperty(FileIdPropertyName, "NA");
+        }
+
+
         private static void EnsureRegApp(Database db, Transaction tr, string appName)
         {
             var rat = (RegAppTable)tr.GetObject(db.RegAppTableId, OpenMode.ForRead);

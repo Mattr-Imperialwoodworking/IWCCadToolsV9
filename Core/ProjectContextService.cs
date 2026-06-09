@@ -219,6 +219,12 @@ namespace IWCCadToolsV9.Core
             // This load path already resolves through dbo.Proj_Compile and
             // dbo.Proj_DashCompileReport, so inactive/archived records remain available.
             _ = LoadProjectDataAsync(projId, dashId);
+
+            if (dashId.HasValue && dashId.Value > 0)
+            {
+                DrawingSeriesService.ReviewLoggedSheetsAfterProjectDashChange(
+                    _doc, null, projId, dashId.Value);
+            }
         }
 
         /// <summary>
@@ -243,6 +249,19 @@ namespace IWCCadToolsV9.Core
             ProjectLoaded?.Invoke(this, EventArgs.Empty);
         }
 
+
+        private static int? ReadProjectIdFromDwg()
+        {
+            string? idStr = AcadFilePropHelper.GetCustomProperty("IWC_ID");
+            return int.TryParse(idStr, out int id) && id > 0 ? id : null;
+        }
+
+        private static int? ReadDashIdFromDwg()
+        {
+            string? idStr = AcadFilePropHelper.GetCustomProperty("IWC_SeriesID");
+            return int.TryParse(idStr, out int id) && id > 0 ? id : null;
+        }
+
         // -----------------------------------------------------------------------
         // Change project
         // -----------------------------------------------------------------------
@@ -253,6 +272,9 @@ namespace IWCCadToolsV9.Core
         /// </summary>
         public void ChangeProject()
         {
+            int? previousProjectId = ReadProjectIdFromDwg();
+            int? previousDashId = ReadDashIdFromDwg();
+
             Project   = null;
             Dash      = null;
             Dashes    = Array.Empty<DashRecord>();
@@ -261,6 +283,15 @@ namespace IWCCadToolsV9.Core
 
             DwgPropertyStore.ClearProjectIds(_doc);
             PromptForProject();
+
+            int? newProjectId = ReadProjectIdFromDwg();
+            int? newDashId = ReadDashIdFromDwg();
+            if (newProjectId.HasValue && newDashId.HasValue &&
+                (previousProjectId != newProjectId || previousDashId != newDashId))
+            {
+                DrawingSeriesService.ReviewLoggedSheetsAfterProjectDashChange(
+                    _doc, previousDashId, newProjectId.Value, newDashId.Value);
+            }
         }
 
         // -----------------------------------------------------------------------

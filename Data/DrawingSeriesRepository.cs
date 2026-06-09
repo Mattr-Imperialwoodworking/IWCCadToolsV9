@@ -472,6 +472,248 @@ namespace IWCCadToolsV9.Data
             }
         }
 
+
+        public async Task<IReadOnlyList<LoggedDrawingSeriesSheetLink>> GetLoggedSheetLinksBySheetIdsAsync(IEnumerable<int> sheetIds)
+        {
+            var ids = sheetIds?.Where(id => id > 0).Distinct().ToList() ?? new List<int>();
+            if (ids.Count == 0)
+                return Array.Empty<LoggedDrawingSeriesSheetLink>();
+
+            var result = new List<LoggedDrawingSeriesSheetLink>();
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync().ConfigureAwait(false);
+
+            for (int i = 0; i < ids.Count; i++)
+            {
+                using var cmd = new SqlCommand(@"
+                    SELECT s.ID AS SheetID,
+                           s.FileID,
+                           s.LayoutName,
+                           s.SheetNumber,
+                           s.SheetSubject,
+                           f.ProjID,
+                           f.FullPath,
+                           f.FileName,
+                           a.DashID,
+                           d.Dash_Num,
+                           d.Dash_Desc
+                    FROM dbo.Dwg_Sheet s
+                    INNER JOIN dbo.Dwg_File f ON f.ID = s.FileID
+                    LEFT JOIN dbo.Dwg_DashFile_Assoc a ON a.FileID = f.ID AND (a.IsVoid = 0 OR a.IsVoid IS NULL)
+                    LEFT JOIN dbo.Proj_Dash d ON d.ID = a.DashID
+                    WHERE s.ID = @SheetID
+                      AND (s.IsVoid = 0 OR s.IsVoid IS NULL);", conn);
+                cmd.Parameters.AddWithValue("@SheetID", ids[i]);
+                using var rdr = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await rdr.ReadAsync().ConfigureAwait(false))
+                {
+                    result.Add(new LoggedDrawingSeriesSheetLink
+                    {
+                        SheetId = SafeInt(rdr, "SheetID"),
+                        FileId = SafeInt(rdr, "FileID"),
+                        LayoutName = SafeString(rdr, "LayoutName"),
+                        SheetNumber = SafeString(rdr, "SheetNumber"),
+                        SheetSubject = SafeString(rdr, "SheetSubject"),
+                        ProjectId = SafeNullableInt(rdr, "ProjID"),
+                        FullPath = SafeString(rdr, "FullPath"),
+                        FileName = SafeString(rdr, "FileName"),
+                        DashId = SafeNullableInt(rdr, "DashID"),
+                        DashNum = SafeString(rdr, "Dash_Num"),
+                        DashDesc = SafeString(rdr, "Dash_Desc")
+                    });
+                }
+            }
+
+            return result;
+        }
+
+        public async Task UpdateLoggedFilesToDashAsync(IEnumerable<int> sheetIds, int newProjectId, int newDashId, string fullPath)
+        {
+            var ids = sheetIds?.Where(id => id > 0).Distinct().ToList() ?? new List<int>();
+            if (ids.Count == 0)
+                return;
+
+            string fileName = Path.GetFileName(fullPath ?? string.Empty);
+            string savedPath = Path.GetDirectoryName(fullPath ?? string.Empty) ?? string.Empty;
+            DateTime? modifiedUtc = File.Exists(fullPath) ? File.GetLastWriteTimeUtc(fullPath) : null;
+            long? fileSize = File.Exists(fullPath) ? new FileInfo(fullPath).Length : null;
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync().ConfigureAwait(false);
+            using var tx = await conn.BeginTransactionAsync().ConfigureAwait(false);
+            try
+            {
+                var fileIds = new List<int>();
+                foreach (int sheetId in ids)
+                {
+                    using var cmd = new SqlCommand(@"
+                        SELECT DISTINCT FileID
+                        FROM dbo.Dwg_Sheet
+                        WHERE ID = @SheetID;", conn, (SqlTransaction)tx);
+                    cmd.Parameters.AddWithValue("@SheetID", sheetId);
+                    object? value = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+                    if (value != null && value != DBNull.Value)
+                    {
+                        int fileId = Convert.ToInt32(value);
+                        if (fileId > 0 && !fileIds.Contains(fileId))
+                            fileIds.Add(fileId);
+                    }
+                }
+
+                foreach (int fileId in fileIds)
+                {
+                    using (var cmd = new SqlCommand(@"
+                        UPDATE dbo.Dwg_File
+                        SET ProjID = @ProjID,
+                            SavedPath = @SavedPath,
+                            FileName = @FileName,
+                            FullPath = @FullPath,
+                            FileModifiedUtc = @FileModifiedUtc,
+                            FileSizeBytes = @FileSizeBytes,
+                            DateRevised = SYSUTCDATETIME()
+                        WHERE ID = @FileID;", conn, (SqlTransaction)tx))
+                    {
+                        cmd.Parameters.AddWithValue("@FileID", fileId);
+                        cmd.Parameters.AddWithValue("@ProjID", newProjectId);
+                        cmd.Parameters.AddWithValue("@SavedPath", savedPath);
+                        cmd.Parameters.AddWithValue("@FileName", fileName);
+                        cmd.Parameters.AddWithValue("@FullPath", fullPath ?? string.Empty);
+                        cmd.Parameters.AddWithValue("@FileModifiedUtc", (object?)modifiedUtc ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@FileSizeBytes", (object?)fileSize ?? DBNull.Value);
+                        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    }
+
+                    using (var cmd = new SqlCommand(@"
+                        DELETE FROM dbo.Dwg_DashFile_Assoc
+                        WHERE FileID = @FileID AND DashID <> @DashID;", conn, (SqlTransaction)tx))
+                    {
+                        cmd.Parameters.AddWithValue("@FileID", fileId);
+                        cmd.Parameters.AddWithValue("@DashID", newDashId);
+                        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    }
+
+                    using (var cmd = new SqlCommand(@"
+                        IF NOT EXISTS (SELECT 1 FROM dbo.Dwg_DashFile_Assoc WHERE FileID = @FileID AND DashID = @DashID)
+                        BEGIN
+                            INSERT INTO dbo.Dwg_DashFile_Assoc(DashID, FileID, DateAdded)
+                            VALUES(@DashID, @FileID, SYSUTCDATETIME());
+                        END", conn, (SqlTransaction)tx))
+                    {
+                        cmd.Parameters.AddWithValue("@FileID", fileId);
+                        cmd.Parameters.AddWithValue("@DashID", newDashId);
+                        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    }
+                }
+
+                await tx.CommitAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        public async Task UpdateFilePathAsync(int fileId, int? projectId, string fullPath)
+        {
+            string fileName = Path.GetFileName(fullPath ?? string.Empty);
+            string savedPath = Path.GetDirectoryName(fullPath ?? string.Empty) ?? string.Empty;
+            DateTime? modifiedUtc = File.Exists(fullPath) ? File.GetLastWriteTimeUtc(fullPath) : null;
+            long? fileSize = File.Exists(fullPath) ? new FileInfo(fullPath).Length : null;
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync().ConfigureAwait(false);
+            using var cmd = new SqlCommand(@"
+                UPDATE dbo.Dwg_File
+                SET ProjID = COALESCE(@ProjID, ProjID),
+                    SavedPath = @SavedPath,
+                    FileName = @FileName,
+                    FullPath = @FullPath,
+                    FileModifiedUtc = @FileModifiedUtc,
+                    FileSizeBytes = @FileSizeBytes,
+                    DateRevised = SYSUTCDATETIME()
+                WHERE ID = @FileID;", conn);
+            cmd.Parameters.AddWithValue("@FileID", fileId);
+            cmd.Parameters.AddWithValue("@ProjID", (object?)projectId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SavedPath", savedPath);
+            cmd.Parameters.AddWithValue("@FileName", fileName);
+            cmd.Parameters.AddWithValue("@FullPath", fullPath ?? string.Empty);
+            cmd.Parameters.AddWithValue("@FileModifiedUtc", (object?)modifiedUtc ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@FileSizeBytes", (object?)fileSize ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        public async Task DeleteLoggedSheetAssociationsAsync(IEnumerable<int> sheetIds, bool deleteOrphanFiles)
+        {
+            var ids = sheetIds?.Where(id => id > 0).Distinct().ToList() ?? new List<int>();
+            if (ids.Count == 0)
+                return;
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync().ConfigureAwait(false);
+            using var tx = await conn.BeginTransactionAsync().ConfigureAwait(false);
+            try
+            {
+                var fileIds = new List<int>();
+                foreach (int sheetId in ids)
+                {
+                    using (var fileCmd = new SqlCommand("SELECT FileID FROM dbo.Dwg_Sheet WHERE ID = @SheetID;", conn, (SqlTransaction)tx))
+                    {
+                        fileCmd.Parameters.AddWithValue("@SheetID", sheetId);
+                        object? value = await fileCmd.ExecuteScalarAsync().ConfigureAwait(false);
+                        if (value != null && value != DBNull.Value)
+                        {
+                            int fileId = Convert.ToInt32(value);
+                            if (fileId > 0 && !fileIds.Contains(fileId))
+                                fileIds.Add(fileId);
+                        }
+                    }
+
+                    using (var cmd = new SqlCommand("DELETE FROM dbo.Dwg_Sheet WHERE ID = @SheetID;", conn, (SqlTransaction)tx))
+                    {
+                        cmd.Parameters.AddWithValue("@SheetID", sheetId);
+                        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    }
+                }
+
+                if (deleteOrphanFiles)
+                {
+                    foreach (int fileId in fileIds)
+                    {
+                        int remainingSheets;
+                        using (var cmd = new SqlCommand("SELECT COUNT(1) FROM dbo.Dwg_Sheet WHERE FileID = @FileID;", conn, (SqlTransaction)tx))
+                        {
+                            cmd.Parameters.AddWithValue("@FileID", fileId);
+                            remainingSheets = Convert.ToInt32(await cmd.ExecuteScalarAsync().ConfigureAwait(false));
+                        }
+
+                        if (remainingSheets == 0)
+                        {
+                            using (var cmd = new SqlCommand("DELETE FROM dbo.Dwg_DashFile_Assoc WHERE FileID = @FileID;", conn, (SqlTransaction)tx))
+                            {
+                                cmd.Parameters.AddWithValue("@FileID", fileId);
+                                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                            }
+
+                            using (var cmd = new SqlCommand("DELETE FROM dbo.Dwg_File WHERE ID = @FileID;", conn, (SqlTransaction)tx))
+                            {
+                                cmd.Parameters.AddWithValue("@FileID", fileId);
+                                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                            }
+                        }
+                    }
+                }
+
+                await tx.CommitAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
+
         private async Task<DrawingSeriesDashNode?> GetDashInfoAsync(int dashId)
         {
             using var conn = IWCConn.GetSqlConnection();
@@ -591,4 +833,20 @@ namespace IWCCadToolsV9.Data
         private static DateTime? SafeNullableDateTime(SqlDataReader rdr, string name)
             => rdr[name] == DBNull.Value ? null : Convert.ToDateTime(rdr[name]);
     }
+
+    public sealed class LoggedDrawingSeriesSheetLink
+    {
+        public int SheetId { get; set; }
+        public int FileId { get; set; }
+        public string LayoutName { get; set; } = string.Empty;
+        public string SheetNumber { get; set; } = string.Empty;
+        public string SheetSubject { get; set; } = string.Empty;
+        public int? ProjectId { get; set; }
+        public string FullPath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public int? DashId { get; set; }
+        public string DashNum { get; set; } = string.Empty;
+        public string DashDesc { get; set; } = string.Empty;
+    }
+
 }

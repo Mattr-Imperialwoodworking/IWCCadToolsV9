@@ -557,7 +557,7 @@ namespace IWCCadToolsV9.UI
                         var fileNode = new TreeNode($"{file.FileName}  ({file.Sheets.Count:N0} sheets)") { Tag = file };
                         foreach (var sheet in file.Sheets)
                         {
-                            fileNode.Nodes.Add(new TreeNode($"{sheet.SheetNumber} - {sheet.SheetSubject}") { Tag = sheet });
+                            fileNode.Nodes.Add(new TreeNode(FormatDrawingSeriesSheetNodeText(sheet)) { Tag = sheet });
                         }
                         dashNode.Nodes.Add(fileNode);
                     }
@@ -575,6 +575,62 @@ namespace IWCCadToolsV9.UI
 
         private void btnDrawingSeriesRefresh_Click(object? sender, EventArgs e)
             => LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+
+        private static string FormatDrawingSeriesSheetNodeText(DrawingSeriesSheetRecord sheet)
+        {
+            string number = string.IsNullOrWhiteSpace(sheet.SheetNumber)
+                ? sheet.LayoutName
+                : sheet.SheetNumber;
+
+            return string.IsNullOrWhiteSpace(sheet.SheetSubject)
+                ? $"{number} -"
+                : $"{number} - {sheet.SheetSubject}";
+        }
+
+        private void UpdateDrawingSeriesSheetNode(TreeNode sheetNode, DrawingSeriesSheetRecord updatedSheet)
+        {
+            sheetNode.Tag = updatedSheet;
+            sheetNode.Text = FormatDrawingSeriesSheetNodeText(updatedSheet);
+
+            if (sheetNode.Parent?.Tag is DrawingSeriesFileRecord file)
+            {
+                int index = file.Sheets.FindIndex(s => s.SheetId == updatedSheet.SheetId);
+                if (index >= 0)
+                    file.Sheets[index] = updatedSheet;
+
+                sheetNode.Parent.Text = $"{file.FileName}  ({file.Sheets.Count:N0} sheets)";
+            }
+
+            sheetNode.Parent?.Expand();
+            sheetNode.EnsureVisible();
+            tvDrawingSeriesSheets.SelectedNode = sheetNode;
+        }
+
+        private TreeNode? FindDrawingSeriesSheetNode(int sheetId)
+        {
+            foreach (TreeNode root in tvDrawingSeriesSheets.Nodes)
+            {
+                var match = FindDrawingSeriesSheetNode(root, sheetId);
+                if (match != null) return match;
+            }
+
+            return null;
+        }
+
+        private static TreeNode? FindDrawingSeriesSheetNode(TreeNode node, int sheetId)
+        {
+            if (node.Tag is DrawingSeriesSheetRecord sheet && sheet.SheetId == sheetId)
+                return node;
+
+            foreach (TreeNode child in node.Nodes)
+            {
+                var match = FindDrawingSeriesSheetNode(child, sheetId);
+                if (match != null) return match;
+            }
+
+            return null;
+        }
+
 
         private void btnDrawingSeriesRefreshDatabase_Click(object? sender, EventArgs e)
         {
@@ -687,7 +743,10 @@ namespace IWCCadToolsV9.UI
         private void tvDrawingSeriesSheets_NodeMouseDoubleClick(object? sender, TreeNodeMouseClickEventArgs e)
         {
             if (e.Node?.Tag is DrawingSeriesSheetRecord sheet)
+            {
+                tvDrawingSeriesSheets.SelectedNode = e.Node;
                 EditDrawingSeriesSheet(sheet, e.Node.Parent?.Tag as DrawingSeriesFileRecord);
+            }
         }
 
         private void drawingSeriesSheets_EditSheet_Click(object? sender, EventArgs e)
@@ -747,6 +806,11 @@ namespace IWCCadToolsV9.UI
 
         private void EditDrawingSeriesSheet(DrawingSeriesSheetRecord sheet, DrawingSeriesFileRecord? file)
         {
+            TreeNode? editedNode = tvDrawingSeriesSheets.SelectedNode?.Tag is DrawingSeriesSheetRecord selectedSheet
+                && selectedSheet.SheetId == sheet.SheetId
+                    ? tvDrawingSeriesSheets.SelectedNode
+                    : FindDrawingSeriesSheetNode(sheet.SheetId);
+
             using var frm = new FrmDrawingSeriesSheetEdit(sheet);
             if (frm.ShowDialog(this) != DialogResult.OK) return;
 
@@ -791,7 +855,10 @@ namespace IWCCadToolsV9.UI
                         "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
 
-                LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+                if (editedNode != null)
+                    UpdateDrawingSeriesSheetNode(editedNode, updated);
+                else
+                    LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
             }
             catch (System.Exception ex)
             {
