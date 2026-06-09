@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Drawing.Printing;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.EditorInput;
@@ -10,6 +11,7 @@ using IWCCadToolsV9.Data;
 using IWCCadToolsV9.Core;
 using IWCCadToolsV9.Commands;
 using IWCCadToolsV9.Data.Models;
+using IWCCadToolsV9.Helpers;
 using Microsoft.Data.SqlClient;
 using Application = Autodesk.AutoCAD.ApplicationServices.Application;
 
@@ -45,7 +47,23 @@ namespace IWCCadToolsV9.UI
             // when the user switches between open drawings
             Application.DocumentManager.DocumentActivated += OnDocumentActivated;
 
+            DrawingSeriesService.DrawingSeriesDataChanged -= OnDrawingSeriesDataChanged;
+            DrawingSeriesService.DrawingSeriesDataChanged += OnDrawingSeriesDataChanged;
+
             RefreshFromContext();
+        }
+
+        private void OnDrawingSeriesDataChanged(object? sender, EventArgs e)
+        {
+            if (IsDisposed) return;
+
+            void RefreshDrawingSeriesView()
+                => LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+
+            if (InvokeRequired)
+                BeginInvoke((MethodInvoker)RefreshDrawingSeriesView);
+            else
+                RefreshDrawingSeriesView();
         }
 
         // -----------------------------------------------------------------------
@@ -144,7 +162,10 @@ namespace IWCCadToolsV9.UI
             // Tab 2 — Current BOM — current active dash quick reference.
             LoadCurrentBom(proj?.Id ?? 0, dash?.DashId ?? 0);
 
-            // Tab 3 — DWG File Properties — always re-read from the DWG after
+            // Tab 3 — Drawing Series — dash/file/sheet association view.
+            LoadDrawingSeries(proj?.Id ?? 0, dash?.DashId ?? 0);
+
+            // Tab 4 — DWG File Properties — always re-read from the DWG after
             // PersistToDwg() so the File Properties tab reflects what was written.
             LoadFileProps();
         }
@@ -485,6 +506,298 @@ namespace IWCCadToolsV9.UI
             if (doc == null) return;
 
             doc.SendStringToExecute($"{commandName} ", true, false, false);
+        }
+
+
+        private async void LoadDrawingSeries(int projectId, int dashId)
+        {
+            if (lblDrawingSeriesContext == null || dgvDrawingSeriesFiles == null || tvDrawingSeriesSheets == null)
+                return;
+
+            dgvDrawingSeriesFiles.Rows.Clear();
+            tvDrawingSeriesSheets.Nodes.Clear();
+
+            bool hasContext = projectId > 0 && dashId > 0;
+            if (btnDrawingSeriesAssociateCurrent != null) btnDrawingSeriesAssociateCurrent.Enabled = hasContext;
+            if (btnDrawingSeriesRefresh != null) btnDrawingSeriesRefresh.Enabled = hasContext;
+            if (btnDrawingSeriesRefreshDatabase != null) btnDrawingSeriesRefreshDatabase.Enabled = hasContext;
+
+            var proj = _currentSvc?.Project;
+            var dash = _currentSvc?.Dash;
+            lblDrawingSeriesContext.Text = hasContext && proj != null && dash != null
+                ? $"{proj.IdNum}-{dash.DashNum} {proj.Name}, {dash.DashDesc}"
+                : "No active dash selected for this drawing.";
+
+            if (!hasContext) return;
+
+            try
+            {
+                var repo = new DrawingSeriesRepository();
+                var nodes = await repo.GetDashSheetTreeAsync(projectId, dashId);
+
+                foreach (var dashNodeData in nodes)
+                {
+                    var dashNode = new TreeNode(dashNodeData.IsCurrentDash
+                        ? $"{dashNodeData.DisplayText}  (current)"
+                        : dashNodeData.DisplayText)
+                    {
+                        Tag = dashNodeData
+                    };
+
+                    foreach (var file in dashNodeData.Files)
+                    {
+                        int rowIndex = dgvDrawingSeriesFiles.Rows.Add(
+                            dashNodeData.DashNum,
+                            dashNodeData.DashDesc,
+                            file.FileName,
+                            file.SavedPath,
+                            file.Sheets.Count.ToString("N0"));
+                        dgvDrawingSeriesFiles.Rows[rowIndex].Tag = file;
+
+                        var fileNode = new TreeNode($"{file.FileName}  ({file.Sheets.Count:N0} sheets)") { Tag = file };
+                        foreach (var sheet in file.Sheets)
+                        {
+                            fileNode.Nodes.Add(new TreeNode($"{sheet.SheetNumber} - {sheet.SheetSubject}") { Tag = sheet });
+                        }
+                        dashNode.Nodes.Add(fileNode);
+                    }
+
+                    tvDrawingSeriesSheets.Nodes.Add(dashNode);
+                    dashNode.Expand();
+                }
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"Unable to load Drawing Series data.\n\n{ex.Message}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void btnDrawingSeriesRefresh_Click(object? sender, EventArgs e)
+            => LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+
+        private void btnDrawingSeriesRefreshDatabase_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                bool refreshed = DrawingSeriesService.RefreshActiveDocumentSheetsToDatabase(_currentSvc, showSuccessMessage: true);
+                if (refreshed)
+                    LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"Unable to refresh Drawing Series sheet data.\n\n{ex.Message}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void btnDrawingSeriesAssociateCurrent_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                bool associated = DrawingSeriesService.AssociateActiveDocument(_currentSvc, showSuccessMessage: true);
+                if (associated)
+                    LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"Unable to associate current drawing.\n\n{ex.Message}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void dgvDrawingSeriesFiles_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            if (dgvDrawingSeriesFiles.Rows[e.RowIndex].Tag is not DrawingSeriesFileRecord file) return;
+            OpenDrawingSeriesFile(file);
+        }
+
+        private void OpenDrawingSeriesFile(DrawingSeriesFileRecord file)
+        {
+            if (!DrawingSeriesAcadHelper.TryOpenDwg(file.FullPath))
+            {
+                MessageBox.Show($"Unable to open file.\n\n{file.FullPath}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // When a tracked file is opened or activated, push database sheet values
+            // back to the layout/titleblock so renamed sheets stay coordinated.
+            DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
+        }
+
+        private DrawingSeriesFileRecord? GetSelectedDrawingSeriesFile()
+        {
+            if (dgvDrawingSeriesFiles.SelectedRows.Count == 0) return null;
+            return dgvDrawingSeriesFiles.SelectedRows[0].Tag as DrawingSeriesFileRecord;
+        }
+
+        private void drawingSeriesFiles_OpenFile_Click(object? sender, EventArgs e)
+        {
+            var file = GetSelectedDrawingSeriesFile();
+            if (file != null) OpenDrawingSeriesFile(file);
+        }
+
+        private void drawingSeriesFiles_OpenLocation_Click(object? sender, EventArgs e)
+        {
+            var file = GetSelectedDrawingSeriesFile();
+            if (file == null) return;
+            if (!DrawingSeriesAcadHelper.TryOpenFileLocation(file.FullPath))
+            {
+                MessageBox.Show($"Unable to open file location.\n\n{file.FullPath}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+
+        private void drawingSeriesFiles_DeleteFileEntry_Click(object? sender, EventArgs e)
+        {
+            var file = GetSelectedDrawingSeriesFile();
+            if (file == null) return;
+
+            var confirm = MessageBox.Show(
+                $"Delete this drawing series file entry?\n\n{file.FileName}\n{file.FullPath}\n\nThis removes the dash/file association from the database. If no other dash is associated to this file, its logged sheet entries will also be removed.",
+                "IWC Drawing Series", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+
+            try
+            {
+                var repo = new DrawingSeriesRepository();
+                repo.DeleteFileEntryAsync(file.DashId, file.FileId).GetAwaiter().GetResult();
+                LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"Unable to delete drawing series file entry.\n\n{ex.Message}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void dgvDrawingSeriesFiles_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                dgvDrawingSeriesFiles.ClearSelection();
+                dgvDrawingSeriesFiles.Rows[e.RowIndex].Selected = true;
+                dgvDrawingSeriesFiles.CurrentCell = dgvDrawingSeriesFiles.Rows[e.RowIndex].Cells[0];
+            }
+        }
+
+        private void tvDrawingSeriesSheets_NodeMouseDoubleClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (e.Node?.Tag is DrawingSeriesSheetRecord sheet)
+                EditDrawingSeriesSheet(sheet, e.Node.Parent?.Tag as DrawingSeriesFileRecord);
+        }
+
+        private void drawingSeriesSheets_EditSheet_Click(object? sender, EventArgs e)
+        {
+            if (tvDrawingSeriesSheets.SelectedNode?.Tag is DrawingSeriesSheetRecord sheet)
+                EditDrawingSeriesSheet(sheet, tvDrawingSeriesSheets.SelectedNode.Parent?.Tag as DrawingSeriesFileRecord);
+        }
+
+        private void drawingSeriesSheets_JumpToLayout_Click(object? sender, EventArgs e)
+        {
+            if (tvDrawingSeriesSheets.SelectedNode?.Tag is not DrawingSeriesSheetRecord sheet)
+                return;
+
+            var file = tvDrawingSeriesSheets.SelectedNode.Parent?.Tag as DrawingSeriesFileRecord;
+            if (file == null)
+                return;
+
+            if (!DrawingSeriesAcadHelper.TryActivateSheetLayout(file.FullPath, sheet))
+            {
+                MessageBox.Show($"Unable to open the file and jump to the selected layout.\n\nFile: {file.FullPath}\nLayout: {sheet.LayoutName}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
+        }
+
+
+        private void drawingSeriesSheets_DeleteSheetEntry_Click(object? sender, EventArgs e)
+        {
+            if (tvDrawingSeriesSheets.SelectedNode?.Tag is not DrawingSeriesSheetRecord sheet)
+                return;
+
+            var confirm = MessageBox.Show(
+                $"Delete this drawing series sheet entry?\n\n{sheet.SheetNumber} - {sheet.SheetSubject}\nLayout: {sheet.LayoutName}",
+                "IWC Drawing Series", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+
+            try
+            {
+                var repo = new DrawingSeriesRepository();
+                repo.DeleteSheetAsync(sheet.SheetId).GetAwaiter().GetResult();
+                LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"Unable to delete drawing series sheet entry.\n\n{ex.Message}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void tvDrawingSeriesSheets_NodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+                tvDrawingSeriesSheets.SelectedNode = e.Node;
+        }
+
+        private void EditDrawingSeriesSheet(DrawingSeriesSheetRecord sheet, DrawingSeriesFileRecord? file)
+        {
+            using var frm = new FrmDrawingSeriesSheetEdit(sheet);
+            if (frm.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                // IWC titleblocks derive the SHEET value from the paper-space layout tab name.
+                // Therefore the sheet number edit renames the layout tab; the SHEET attribute is
+                // not written directly.
+                string requestedLayoutName = !string.IsNullOrWhiteSpace(frm.SheetNumber)
+                    ? frm.SheetNumber.Trim()
+                    : sheet.LayoutName;
+
+                // Apply to the actual drawing first.  If the sheet belongs to a file that is not
+                // active, open/activate that file so the layout tab and titleblock update the
+                // correct DWG instead of silently doing nothing in the current drawing.
+                if (file != null)
+                {
+                    if (!DrawingSeriesAcadHelper.TryOpenDwg(file.FullPath))
+                    {
+                        MessageBox.Show($"Unable to open the drawing that contains this sheet.\n\n{file.FullPath}",
+                            "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+
+                var updated = sheet with
+                {
+                    LayoutName = requestedLayoutName,
+                    SheetNumber = frm.SheetNumber,
+                    SheetSubject = frm.SheetSubject
+                };
+
+                bool drawingUpdated = DrawingSeriesAcadHelper.TryApplySheetRecordToActiveDocument(updated, renameLayoutToSheetNumber: true);
+
+                var repo = new DrawingSeriesRepository();
+                repo.UpdateSheetAsync(sheet.SheetId, requestedLayoutName, frm.SheetNumber, frm.SheetSubject)
+                    .GetAwaiter().GetResult();
+
+                if (!drawingUpdated)
+                {
+                    MessageBox.Show("The database entry was updated, but the active drawing did not contain a matching logged layout/titleblock to update.",
+                        "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
+                LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"Unable to update sheet data.\n\n{ex.Message}",
+                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void btnBomAddMaterial_Click(object? sender, EventArgs e)
@@ -2084,65 +2397,17 @@ namespace IWCCadToolsV9.UI
             => SaveProjectDashDetails();
 
         // -----------------------------------------------------------------------
-        // Top sheet tab styling
-        // -----------------------------------------------------------------------
-
-        private void ConfigureTopSheetTabs()
-        {
-            // Keep the tab page content on the normal inherited font, but owner-draw
-            // the top sheet tab captions so only the tab headers are bold.
-            tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
-            tabControl.Padding = new Point(10, 4);
-            tabControl.DrawItem -= TabControl_DrawItem;
-            tabControl.DrawItem += TabControl_DrawItem;
-        }
-
-        private void TabControl_DrawItem(object? sender, DrawItemEventArgs e)
-        {
-            if (sender is not TabControl tabs || e.Index < 0 || e.Index >= tabs.TabPages.Count)
-                return;
-
-            TabPage page = tabs.TabPages[e.Index];
-            Rectangle tabBounds = tabs.GetTabRect(e.Index);
-            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-
-            Color backColor = selected ? SystemColors.Window : SystemColors.Control;
-            Color borderColor = selected ? SystemColors.ControlDark : SystemColors.ControlLight;
-
-            using (var backBrush = new SolidBrush(backColor))
-                e.Graphics.FillRectangle(backBrush, tabBounds);
-
-            using (var boldFont = new Font(tabs.Font, FontStyle.Bold))
-            {
-                TextRenderer.DrawText(
-                    e.Graphics,
-                    page.Text,
-                    boldFont,
-                    tabBounds,
-                    tabs.Enabled ? SystemColors.ControlText : SystemColors.GrayText,
-                    TextFormatFlags.HorizontalCenter |
-                    TextFormatFlags.VerticalCenter |
-                    TextFormatFlags.SingleLine |
-                    TextFormatFlags.EndEllipsis |
-                    TextFormatFlags.NoPrefix);
-            }
-
-            ControlPaint.DrawBorder(e.Graphics, tabBounds, borderColor, ButtonBorderStyle.Solid);
-            e.DrawFocusRectangle();
-        }
-
-        // -----------------------------------------------------------------------
         // Designer-generated members (unchanged from original)
         // -----------------------------------------------------------------------
 
         private void InitializeComponent()
         {
             tabControl   = new TabControl();
-            ConfigureTopSheetTabs();
-
             var tabProj  = new TabPage("Current Project");
             var tabBom   = new TabPage("Current BOM");
+            var tabDrawingSeries = new TabPage("Drawing Series");
             var tabFile  = new TabPage("File Properties");
+            ConfigureTopTabs();
 
             // --- Tab 1: Current Project ---
             var tabProjMain = new TableLayoutPanel
@@ -2474,7 +2739,118 @@ namespace IWCCadToolsV9.UI
             bomMain.Controls.Add(bomButtonRow, 0, 5);
             tabBom.Controls.Add(bomMain);
 
-            // --- Tab 2: File Properties — inner TabControl ---
+
+            // --- Tab 3: Drawing Series ---
+            var drawingSeriesMain = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 6,
+                Padding = new Padding(8)
+            };
+            drawingSeriesMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            drawingSeriesMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+            drawingSeriesMain.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
+            drawingSeriesMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+            drawingSeriesMain.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
+            drawingSeriesMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+
+            lblDrawingSeriesContext = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "No active dash selected for this drawing.",
+                Font = new Font(Font, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            drawingSeriesMain.Controls.Add(lblDrawingSeriesContext, 0, 0);
+
+            lblDrawingSeriesFilesTitle = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Series Files",
+                Font = new Font(Font, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            drawingSeriesMain.Controls.Add(lblDrawingSeriesFilesTitle, 0, 1);
+
+            dgvDrawingSeriesFiles = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                ReadOnly = true,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                RowHeadersVisible = false
+            };
+            dgvDrawingSeriesFiles.Columns.Add("DashNum", "Dash");
+            dgvDrawingSeriesFiles.Columns.Add("DashDesc", "Dash Description");
+            dgvDrawingSeriesFiles.Columns.Add("FileName", "File Name");
+            dgvDrawingSeriesFiles.Columns.Add("SavedPath", "Saved Path");
+            dgvDrawingSeriesFiles.Columns.Add("SheetCount", "Sheets");
+            dgvDrawingSeriesFiles.Columns["DashNum"].FillWeight = 14;
+            dgvDrawingSeriesFiles.Columns["DashDesc"].FillWeight = 24;
+            dgvDrawingSeriesFiles.Columns["FileName"].FillWeight = 26;
+            dgvDrawingSeriesFiles.Columns["SavedPath"].FillWeight = 30;
+            dgvDrawingSeriesFiles.Columns["SheetCount"].FillWeight = 8;
+            dgvDrawingSeriesFiles.CellDoubleClick += dgvDrawingSeriesFiles_CellDoubleClick;
+            dgvDrawingSeriesFiles.CellMouseDown += dgvDrawingSeriesFiles_CellMouseDown;
+            var drawingSeriesFileMenu = new ContextMenuStrip();
+            drawingSeriesFileMenu.Items.Add("Open File", null, drawingSeriesFiles_OpenFile_Click);
+            drawingSeriesFileMenu.Items.Add("Open File Location", null, drawingSeriesFiles_OpenLocation_Click);
+            drawingSeriesFileMenu.Items.Add(new ToolStripSeparator());
+            drawingSeriesFileMenu.Items.Add("Delete File Entry", null, drawingSeriesFiles_DeleteFileEntry_Click);
+            dgvDrawingSeriesFiles.ContextMenuStrip = drawingSeriesFileMenu;
+            drawingSeriesMain.Controls.Add(dgvDrawingSeriesFiles, 0, 2);
+
+            lblDrawingSeriesSheetsTitle = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Series Sheets",
+                Font = new Font(Font, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            drawingSeriesMain.Controls.Add(lblDrawingSeriesSheetsTitle, 0, 3);
+
+            tvDrawingSeriesSheets = new TreeView
+            {
+                Dock = DockStyle.Fill,
+                HideSelection = false,
+                ShowLines = true,
+                ShowPlusMinus = true,
+                ShowRootLines = true
+            };
+            tvDrawingSeriesSheets.NodeMouseDoubleClick += tvDrawingSeriesSheets_NodeMouseDoubleClick;
+            tvDrawingSeriesSheets.NodeMouseClick += tvDrawingSeriesSheets_NodeMouseClick;
+            var drawingSeriesSheetMenu = new ContextMenuStrip();
+            drawingSeriesSheetMenu.Items.Add("Edit Sheet Number / Subject", null, drawingSeriesSheets_EditSheet_Click);
+            drawingSeriesSheetMenu.Items.Add("Jump to Layout", null, drawingSeriesSheets_JumpToLayout_Click);
+            drawingSeriesSheetMenu.Items.Add(new ToolStripSeparator());
+            drawingSeriesSheetMenu.Items.Add("Delete Sheet Entry", null, drawingSeriesSheets_DeleteSheetEntry_Click);
+            tvDrawingSeriesSheets.ContextMenuStrip = drawingSeriesSheetMenu;
+            drawingSeriesMain.Controls.Add(tvDrawingSeriesSheets, 0, 4);
+
+            var drawingSeriesButtons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(4, 5, 4, 4)
+            };
+            btnDrawingSeriesRefresh = new Button { Text = "Refresh View", Width = 105, Height = 28 };
+            btnDrawingSeriesRefresh.Click += btnDrawingSeriesRefresh_Click;
+            btnDrawingSeriesRefreshDatabase = new Button { Text = "Refresh Database", Width = 130, Height = 28 };
+            btnDrawingSeriesRefreshDatabase.Click += btnDrawingSeriesRefreshDatabase_Click;
+            btnDrawingSeriesAssociateCurrent = new Button { Text = "Add Current File to Dash", Width = 170, Height = 28 };
+            btnDrawingSeriesAssociateCurrent.Click += btnDrawingSeriesAssociateCurrent_Click;
+            drawingSeriesButtons.Controls.Add(btnDrawingSeriesRefresh);
+            drawingSeriesButtons.Controls.Add(btnDrawingSeriesRefreshDatabase);
+            drawingSeriesButtons.Controls.Add(btnDrawingSeriesAssociateCurrent);
+            drawingSeriesMain.Controls.Add(drawingSeriesButtons, 0, 5);
+
+            tabDrawingSeries.Controls.Add(drawingSeriesMain);
+
+            // --- Tab 4: File Properties — inner TabControl ---
             var fileTabCtl = new TabControl { Dock = DockStyle.Fill };
 
             // ── Sub-tab A: Custom Properties ──────────────────────────────
@@ -2583,10 +2959,40 @@ namespace IWCCadToolsV9.UI
             tabFile.Controls.Add(fileTabCtl);
             tabFile.Controls.Add(fileBtnRow);
 
-            tabControl.Controls.AddRange(new Control[] { tabProj, tabBom, tabFile });
+            tabControl.Controls.AddRange(new Control[] { tabProj, tabBom, tabDrawingSeries, tabFile });
             Controls.Add(tabControl);
             Size = new Size(420, 440);
             Name = "CtlIWCProj";
+        }
+
+
+        private void ConfigureTopTabs()
+        {
+            tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabControl.ItemSize = new Size(128, 26);
+            tabControl.SizeMode = TabSizeMode.Fixed;
+            tabControl.DrawItem += tabControl_DrawItem;
+        }
+
+        private void tabControl_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (sender is not TabControl tc || e.Index < 0 || e.Index >= tc.TabPages.Count)
+                return;
+
+            var page = tc.TabPages[e.Index];
+            bool selected = e.Index == tc.SelectedIndex;
+            var bounds = e.Bounds;
+            using var backBrush = new SolidBrush(selected ? SystemColors.Window : SystemColors.Control);
+            e.Graphics.FillRectangle(backBrush, bounds);
+            using var tabFont = new Font(tc.Font, FontStyle.Bold);
+            TextRenderer.DrawText(
+                e.Graphics,
+                page.Text,
+                tabFont,
+                bounds,
+                SystemColors.ControlText,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            e.DrawFocusRectangle();
         }
 
         private static TextBox AddReadOnlyRow(TableLayoutPanel tbl, int row, string label)
@@ -2853,11 +3259,21 @@ namespace IWCCadToolsV9.UI
         private Button          btnBomInsertMetalTable = null!;
         private Button          btnBomInsertCompList = null!;
 
-        // Controls — Tab 3 / File Properties tab
+        // Controls — Tab 3 (Drawing Series)
+        private Label           lblDrawingSeriesContext = null!;
+        private Label           lblDrawingSeriesFilesTitle = null!;
+        private Label           lblDrawingSeriesSheetsTitle = null!;
+        private DataGridView    dgvDrawingSeriesFiles = null!;
+        private TreeView        tvDrawingSeriesSheets = null!;
+        private Button          btnDrawingSeriesAssociateCurrent = null!;
+        private Button          btnDrawingSeriesRefresh = null!;
+        private Button          btnDrawingSeriesRefreshDatabase = null!;
+
+        // Controls — Tab 4 / File Properties tab
         private DataGridView    dgvCustomProps   = null!;
         private Button          btnSaveFileProps  = null!;
 
-        // Controls — Tab 3 / Summary sub-tab
+        // Controls — Tab 4 / Summary sub-tab
         private TextBox         txtSummTitle     = null!;
         private TextBox         txtSummSubject   = null!;
         private TextBox         txtSummAuthor    = null!;
@@ -2866,7 +3282,7 @@ namespace IWCCadToolsV9.UI
         private TextBox         txtSummRevision  = null!;
         private TextBox         txtSummComments  = null!;
 
-        // Controls — Tab 3 / File Info sub-tab
+        // Controls — Tab 4 / File Info sub-tab
         private TextBox         txtInfoFile      = null!;
         private TextBox         txtInfoLocation  = null!;
         private TextBox         txtInfoSize      = null!;

@@ -77,6 +77,7 @@ namespace IWCCadToolsV9.Core
                 var svc = ProjectContextService.GetOrCreate(doc);
                 DwgPropertyStore.EnsureAllKeysExist(doc);
                 WireBeforeSaveOnce(doc, svc);
+                WireSheetEraseMonitorOnce(doc);
                 AutoUpdateExistingTablesOnce(doc);
 
                 if (svc.HasProject)
@@ -113,13 +114,18 @@ namespace IWCCadToolsV9.Core
 
                 DwgPropertyStore.EnsureAllKeysExist(doc);
                 WireBeforeSaveOnce(doc, svc);
+                WireSheetEraseMonitorOnce(doc);
 
                 // LoadAsync does SQL I/O — run on background thread, then return
                 // to the AutoCAD main thread before showing any modal dialogs.
                 await svc.LoadAsync().ConfigureAwait(false);
 
                 Application.DocumentManager.ExecuteInApplicationContext(
-                    state => AutoUpdateExistingTablesOnce((Document)state!), doc);
+                    state =>
+                    {
+                        AutoUpdateExistingTablesOnce((Document)state!);
+                        DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
+                    }, doc);
 
                 // PromptForProject / PromptForDash call ShowModalDialog which must
                 // be invoked on the main AutoCAD thread. ExecuteInApplicationContext
@@ -157,6 +163,7 @@ namespace IWCCadToolsV9.Core
                 var svc = ProjectContextService.GetOrCreate(e.Document);
 
                 AutoUpdateExistingTablesOnce(e.Document);
+                DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
 
                 // Re-raise so subscribed UI controls refresh without a DB round-trip
                 // The data is already loaded from when this document was opened/created.
@@ -199,6 +206,42 @@ namespace IWCCadToolsV9.Core
         }
 
         // -----------------------------------------------------------------------
+        // Layout deletion monitor — if a logged paper-space layout tab is erased,
+        // prompt the user to remove the matching Dwg_Sheet row from SQL.
+        // -----------------------------------------------------------------------
+
+        private const string SheetEraseWireKey = "IWC_SheetEraseMonitorWired_v1";
+
+        private static void WireSheetEraseMonitorOnce(Document doc)
+        {
+            if (doc.UserData[SheetEraseWireKey] is bool wired && wired)
+                return;
+
+            doc.Database.ObjectErased += (s, e) =>
+            {
+                try
+                {
+                    if (!e.Erased) return;
+                    if (e.DBObject is not Autodesk.AutoCAD.DatabaseServices.Layout layout) return;
+                    if (layout.ModelType) return;
+
+                    Application.DocumentManager.ExecuteInApplicationContext(
+                        state =>
+                        {
+                            var erasedDoc = (Document)state!;
+                            if (!object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, erasedDoc))
+                                return;
+                            DrawingSeriesService.ReconcileDeletedSheetsInActiveDocument(promptUser: true);
+                        }, doc);
+                }
+                catch { /* layout erase monitoring is best-effort */ }
+            };
+
+            doc.UserData[SheetEraseWireKey] = true;
+        }
+
+
+        // -----------------------------------------------------------------------
         // BeforeSave — wire per-document (called from Created and Opened)
         // -----------------------------------------------------------------------
 
@@ -213,7 +256,12 @@ namespace IWCCadToolsV9.Core
 
             doc.Database.BeginSave += (s, e) =>
             {
-                try { svc.PersistToDwg(); }
+                try
+                {
+                    svc.PersistToDwg();
+                    DrawingSeriesService.ReconcileDeletedSheetsInActiveDocument(promptUser: true);
+                    DrawingSeriesService.PromptToAssociateActiveDocumentIfNeeded(doc, svc);
+                }
                 catch { /* non-fatal — don't block the save */ }
             };
 
