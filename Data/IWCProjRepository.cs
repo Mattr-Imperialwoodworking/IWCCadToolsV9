@@ -54,6 +54,40 @@ namespace IWCCadToolsV9.Data
             return results;
         }
 
+
+
+        /// <summary>
+        /// Returns all projects for the archive project picker list, including inactive/completed/archived projects.
+        /// Queries dbo.Proj_Compile ordered by IDNum ascending.
+        /// Use this only from explicit archive/legacy association workflows; the normal selector must remain active-only.
+        /// </summary>
+        public async Task<IReadOnlyList<ProjectRecord>> GetAllProjectsAsync()
+        {
+            const string sql = @"
+                SELECT ID, IDNum, Proj_Name,
+                       Architect, Contractor, PM, PMINI,
+                       ArchTb, ContTb,
+                       Proj_StartDate, Proj_EstComp, Proj_EstProduction,
+                       Proj_EstInstall, Proj_DateActualComplete,
+                       Act_Drafting, Act_Shop,
+                       LEED, FSC, NAUF, VOC,
+                       Proj_Color, SharepointID, Date_Modified
+                FROM dbo.Proj_Compile
+                ORDER BY IDNum ASC";
+
+            var results = new List<ProjectRecord>();
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync();
+            using var cmd = new SqlCommand(sql, conn);
+            using var rdr = await cmd.ExecuteReaderAsync();
+
+            while (await rdr.ReadAsync())
+                results.Add(MapProject(rdr));
+
+            return results;
+        }
+
         /// <summary>
         /// Returns a single project by primary key.
         /// Queries dbo.Proj_Compile (includes completed projects).
@@ -88,6 +122,9 @@ namespace IWCCadToolsV9.Data
 
         public IReadOnlyList<ProjectRecord> GetActiveProjects()
             => GetActiveProjectsAsync().GetAwaiter().GetResult();
+
+        public IReadOnlyList<ProjectRecord> GetAllProjects()
+            => GetAllProjectsAsync().GetAwaiter().GetResult();
 
         // ============================================================
         // DASH queries — dbo.Proj_DashCompileReportActive / Proj_DashCompile
@@ -132,8 +169,47 @@ namespace IWCCadToolsV9.Data
         }
 
         /// <summary>
-        /// Returns a single dash by its DashID primary key.
-        /// NOTE: Proj_DashCompileReportActive uses DashID — not ID.
+        /// Returns all dashes for a project, including inactive/archived dashes.
+        /// Queries dbo.Proj_DashCompileReport.
+        /// Used when loading an already-associated drawing from DWG custom properties,
+        /// so old project files continue to resolve even after the project/dash is no longer active.
+        /// Do not use this method for the project/dash association picker.
+        /// </summary>
+        public async Task<IReadOnlyList<DashRecord>> GetAllDashesForProjectAsync(int projectId)
+        {
+            const string sql = @"
+                SELECT DashID, Proj_ID, IDNum,
+                       Dash_Num, Dash_Desc, Dash_Dwg,
+                       Dash_Type, Dash_Parent, Dash_Phase,
+                       Act, Act_Draft, Act_Shop, Act_Void,
+                       Dash_DwgPriority,
+                       PMName, CADIni, MfrName, MfrIni,
+                       Date_TargetSubmit, Date_ActualSubmit,
+                       Date_TargetApprove, Date_ActualApprove,
+                       Date_TargetRLSMfr, Date_ActualRlsMfr,
+                       Date_TargetShip, Date_ActualShip,
+                       Date_DashUpdate
+                FROM dbo.Proj_DashCompileReport
+                WHERE Proj_ID = @projId
+                ORDER BY TRY_CAST(Dash_Num AS int), Dash_Num";
+
+            var results = new List<DashRecord>();
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync();
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@projId", projectId);
+            using var rdr = await cmd.ExecuteReaderAsync();
+
+            while (await rdr.ReadAsync())
+                results.Add(MapDash(rdr));
+
+            return results;
+        }
+
+        /// <summary>
+        /// Returns a single dash by its DashID primary key, including inactive/archived dashes.
+        /// NOTE: Proj_DashCompileReport uses DashID — not ID.
         /// Returns null if not found.
         /// </summary>
         public async Task<DashRecord?> GetDashByIdAsync(int dashId)
@@ -150,7 +226,7 @@ namespace IWCCadToolsV9.Data
                        Date_TargetRLSMfr, Date_ActualRlsMfr,
                        Date_TargetShip, Date_ActualShip,
                        Date_DashUpdate
-                FROM dbo.Proj_DashCompileReportActive
+                FROM dbo.Proj_DashCompileReport
                 WHERE DashID = @dashId";
 
             using var conn = IWCConn.GetSqlConnection();
@@ -203,6 +279,9 @@ namespace IWCCadToolsV9.Data
         // Sync wrappers
         public IReadOnlyList<DashRecord> GetDashesForProject(int projectId)
             => GetDashesForProjectAsync(projectId).GetAwaiter().GetResult();
+
+        public IReadOnlyList<DashRecord> GetAllDashesForProject(int projectId)
+            => GetAllDashesForProjectAsync(projectId).GetAwaiter().GetResult();
 
         public DashRecord? GetDashById(int dashId)
             => GetDashByIdAsync(dashId).GetAwaiter().GetResult();

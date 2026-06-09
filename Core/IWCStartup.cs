@@ -65,5 +65,24 @@ namespace IWCCadToolsV9.Core
 
             ProjectContextService.GetOrCreate(doc).ChangeProject();
         }
+
+
+        // -----------------------------------------------------------------------
+        // IWCStartupArchiveProj — explicit legacy/archive association workflow
+        // -----------------------------------------------------------------------
+
+        [CommandMethod("IWCStartupArchiveProj")]
+        public static void IwcStartupArchiveProj()
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+
+            DwgPropertyStore.EnsureAllKeysExist(doc);
+
+            var svc = ProjectContextService.GetOrCreate(doc);
+            svc.PromptForArchiveProject();
+
+            doc.Editor.WriteMessage("\nIWC: Archive project/dash association workflow complete.\n");
+        }
     }
 }

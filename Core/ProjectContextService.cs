@@ -139,7 +139,11 @@ namespace IWCCadToolsV9.Core
             try
             {
                 Project   = await _repo.GetProjectByIdAsync(projectId);
-                Dashes    = await _repo.GetDashesForProjectAsync(projectId);
+                // When loading a drawing that is already associated by DWG custom properties,
+                // include inactive/archived dash records so old project files still resolve.
+                // The project/dash selection dialog still uses GetDashesForProjectAsync(),
+                // which is limited to active project/dash records.
+                Dashes    = await _repo.GetAllDashesForProjectAsync(projectId);
                 Materials = await _repo.GetMaterialsAsync(projectId);
                 Hardware  = await _repo.GetHardwareAsync(projectId);
 
@@ -187,6 +191,33 @@ namespace IWCCadToolsV9.Core
 
             // Async load — fire-and-forget from UI thread is fine here because
             // LoadProjectDataAsync only touches SQL, not the AutoCAD database
+            _ = LoadProjectDataAsync(projId, dashId);
+        }
+
+        /// <summary>
+        /// Shows the archive project + dash selector dialog.
+        /// This is intentionally separate from PromptForProject().
+        /// PromptForProject() remains active-project only; this method loads from
+        /// dbo.Proj_Compile and dbo.Proj_DashCompileReport for legacy archived drawings.
+        /// </summary>
+        public void PromptForArchiveProject()
+        {
+            using var picker = new FrmProjectArchiveSelector();
+            var result = Application.ShowModalDialog(
+                Application.MainWindow.Handle, picker, false);
+
+            if (result != System.Windows.Forms.DialogResult.OK) return;
+            if (!picker.SelectedProjectId.HasValue) return;
+
+            int projId = picker.SelectedProjectId.Value;
+            int? dashId = picker.SelectedDashId;
+
+            // Persist to DWG immediately so archived/legacy associations are saved
+            // the same way as normal active-project associations.
+            DwgPropertyStore.WriteProjectIds(_doc, projId, dashId);
+
+            // This load path already resolves through dbo.Proj_Compile and
+            // dbo.Proj_DashCompileReport, so inactive/archived records remain available.
             _ = LoadProjectDataAsync(projId, dashId);
         }
 

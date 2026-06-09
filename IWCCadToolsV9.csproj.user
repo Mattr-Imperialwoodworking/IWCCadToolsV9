@@ -29,6 +29,12 @@
     <Compile Update="UI\FrmBlockSearch.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="UI\FrmDrawingSeriesSheetEdit.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\FrmProjectArchiveSelector.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="UI\FrmProjectHardwareEditor.cs">
       <SubType>Form</SubType>
     </Compile>
