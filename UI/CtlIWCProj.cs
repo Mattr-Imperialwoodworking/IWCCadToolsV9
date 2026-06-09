@@ -2684,14 +2684,11 @@ namespace IWCCadToolsV9.UI
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 6,
+                RowCount = 3,
                 Padding = new Padding(6)
             };
             bomMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-            bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
-            bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
-            bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
-            bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 32));
+            bomMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             bomMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
 
             lblBomContext = new Label
@@ -2710,7 +2707,6 @@ namespace IWCCadToolsV9.UI
             AddGridColumn(dgvBomComponents, "ActualRelease", "Actual Release", 14);
             AddGridColumn(dgvBomComponents, "TargetShip", "Target Ship", 12);
             AddGridColumn(dgvBomComponents, "ActualShip", "Actual Ship", 12);
-            bomMain.Controls.Add(CreateLabeledPanel("Child Component Dashes", dgvBomComponents), 0, 1);
 
             dgvBomMaterials = CreateBomGrid();
             dgvBomMaterials.ReadOnly = false;
@@ -2723,7 +2719,6 @@ namespace IWCCadToolsV9.UI
             AddGridColumn(dgvBomMaterials, "MatApprove", "Approve", 10, true);
             dgvBomMaterials.CellDoubleClick += dgvBomMaterials_CellDoubleClick;
             dgvBomMaterials.CellEndEdit += dgvBomMaterials_CellEndEdit;
-            bomMain.Controls.Add(CreateLabeledPanel("Associated Materials", dgvBomMaterials), 0, 2);
 
             dgvBomHardware = CreateBomGrid();
             dgvBomHardware.ReadOnly = false;
@@ -2736,7 +2731,6 @@ namespace IWCCadToolsV9.UI
             AddGridColumn(dgvBomHardware, "HdwApprove", "Approve", 10, true);
             dgvBomHardware.CellDoubleClick += dgvBomHardware_CellDoubleClick;
             dgvBomHardware.CellEndEdit += dgvBomHardware_CellEndEdit;
-            bomMain.Controls.Add(CreateLabeledPanel("Associated Hardware", dgvBomHardware), 0, 3);
 
             dgvBomMetal = CreateBomGrid();
             dgvBomMetal.ReadOnly = false;
@@ -2768,7 +2762,39 @@ namespace IWCCadToolsV9.UI
             dgvBomMetal.RowValidated += dgvBomMetal_RowValidated;
             dgvBomMetal.DataError += dgvBomMetal_DataError;
             dgvBomMetal.UserDeletingRow += dgvBomMetal_UserDeletingRow;
-            bomMain.Controls.Add(CreateLabeledPanel("Metal Part List", dgvBomMetal), 0, 4);
+
+            var sectionComponents = new CollapsibleBomSection("Child Component Dashes", dgvBomComponents);
+            var sectionMaterials = new CollapsibleBomSection("Associated Materials", dgvBomMaterials);
+            var sectionHardware = new CollapsibleBomSection("Associated Hardware", dgvBomHardware);
+            var sectionMetal = new CollapsibleBomSection("Metal Part List", dgvBomMetal);
+
+            // Keep all four BOM sections in one ordered stack.  This prevents the last section
+            // (Metal Part List) from snapping to the bottom when collapsed and lets it behave
+            // the same as the component, material, and hardware sections.
+            var bomSectionsTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            bomSectionsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 4; i++)
+                bomSectionsTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
+
+            bomSectionsTable.Controls.Add(sectionComponents, 0, 0);
+            bomSectionsTable.Controls.Add(sectionMaterials, 0, 1);
+            bomSectionsTable.Controls.Add(sectionHardware, 0, 2);
+            bomSectionsTable.Controls.Add(sectionMetal, 0, 3);
+
+            WireBomSectionCollapse(sectionComponents, bomSectionsTable, 0);
+            WireBomSectionCollapse(sectionMaterials, bomSectionsTable, 1);
+            WireBomSectionCollapse(sectionHardware, bomSectionsTable, 2);
+            WireBomSectionCollapse(sectionMetal, bomSectionsTable, 3);
+            UpdateBomSectionRowStyles(bomSectionsTable);
+
+            bomMain.Controls.Add(bomSectionsTable, 0, 1);
 
             var bomButtonRow = new FlowLayoutPanel
             {
@@ -2803,7 +2829,7 @@ namespace IWCCadToolsV9.UI
                 btnBomAddHardware,
                 btnBomAddMaterial
             });
-            bomMain.Controls.Add(bomButtonRow, 0, 5);
+            bomMain.Controls.Add(bomButtonRow, 0, 2);
             tabBom.Controls.Add(bomMain);
 
 
@@ -3225,6 +3251,117 @@ namespace IWCCadToolsV9.UI
             }, 0, 0);
             panel.Controls.Add(child, 0, 1);
             return panel;
+        }
+
+        private static SplitContainer CreateBomSplitContainer()
+        {
+            return new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Horizontal,
+                SplitterWidth = 6,
+                FixedPanel = FixedPanel.None,
+                Panel1MinSize = CollapsibleBomSection.HeaderHeight + 2,
+                Panel2MinSize = CollapsibleBomSection.HeaderHeight + 2,
+                BorderStyle = BorderStyle.None
+            };
+        }
+
+        private static void InitializeBomSplitterDistanceOnce(SplitContainer split, int preferredDistance)
+        {
+            if (split.Tag is string tag && tag == "initialized") return;
+            if (split.Height <= split.Panel1MinSize + split.Panel2MinSize + split.SplitterWidth) return;
+
+            var max = split.Height - split.Panel2MinSize - split.SplitterWidth;
+            split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min(preferredDistance, max));
+            split.Tag = "initialized";
+        }
+
+        private static void WireBomSectionCollapse(CollapsibleBomSection section, TableLayoutPanel table, int rowIndex)
+        {
+            section.CollapsedChanged += (_, __) => UpdateBomSectionRowStyles(table);
+        }
+
+        private static void UpdateBomSectionRowStyles(TableLayoutPanel table)
+        {
+            if (table.RowStyles.Count == 0) return;
+
+            int expandedCount = 0;
+            for (int i = 0; i < table.RowCount; i++)
+            {
+                if (table.GetControlFromPosition(0, i) is CollapsibleBomSection section && !section.Collapsed)
+                    expandedCount++;
+            }
+
+            float expandedPercent = expandedCount > 0 ? 100f / expandedCount : 100f;
+
+            table.SuspendLayout();
+            for (int i = 0; i < table.RowCount; i++)
+            {
+                if (table.GetControlFromPosition(0, i) is CollapsibleBomSection section && section.Collapsed)
+                    table.RowStyles[i] = new RowStyle(SizeType.Absolute, CollapsibleBomSection.HeaderHeight + 6);
+                else
+                    table.RowStyles[i] = new RowStyle(SizeType.Percent, expandedPercent);
+            }
+            table.ResumeLayout(true);
+        }
+
+        private sealed class CollapsibleBomSection : UserControl
+        {
+            public const int HeaderHeight = 24;
+
+            private readonly Label _header;
+            private readonly Control _content;
+            private bool _collapsed;
+
+            public event EventHandler? CollapsedChanged;
+
+            public bool Collapsed
+            {
+                get => _collapsed;
+                set
+                {
+                    if (_collapsed == value) return;
+                    _collapsed = value;
+                    _content.Visible = !_collapsed;
+                    UpdateHeaderText();
+                    CollapsedChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+
+            public CollapsibleBomSection(string caption, Control content)
+            {
+                Dock = DockStyle.Fill;
+                Margin = new Padding(0, 2, 0, 4);
+                MinimumSize = new Size(0, HeaderHeight + 2);
+
+                _content = content;
+                _content.Dock = DockStyle.Fill;
+
+                _header = new Label
+                {
+                    Dock = DockStyle.Top,
+                    Height = HeaderHeight,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                    BackColor = SystemColors.ControlLight,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Padding = new Padding(4, 0, 0, 0),
+                    Cursor = Cursors.Hand,
+                    Tag = caption
+                };
+                _header.Click += (_, __) => Collapsed = !Collapsed;
+
+                Controls.Add(_content);
+                Controls.Add(_header);
+                UpdateHeaderText();
+            }
+
+            private void UpdateHeaderText()
+            {
+                var caption = Convert.ToString(_header.Tag) ?? string.Empty;
+                _header.Text = $"{(Collapsed ? "▶" : "▼")} {caption}";
+            }
         }
 
         private void ConfigureLargeNoteTextBoxes()
