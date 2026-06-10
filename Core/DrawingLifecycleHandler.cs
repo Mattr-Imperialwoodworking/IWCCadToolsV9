@@ -154,21 +154,36 @@ namespace IWCCadToolsV9.Core
         // DocumentActivated — user switches between open drawings
         // -----------------------------------------------------------------------
 
+        // Tracks the file path of the last document for which we ran the SQL sync,
+        // so we only sync when the user switches to a *different file*, not when
+        // AutoCAD fires DocumentActivated for a layout-tab switch within the same DWG.
+        private static string _lastSyncedDocumentPath = string.Empty;
+
         private static void OnDocumentActivated(object sender, DocumentCollectionEventArgs e)
         {
             // Activation is always on the main thread — no ExecuteInApplicationContext needed.
-            // Just raise ProjectLoaded so UI controls (palette, project nav) rebind
-            // to the newly active document's context.
             try
             {
                 if (e.Document == null) return;
                 var svc = ProjectContextService.GetOrCreate(e.Document);
 
-                AutoUpdateExistingTablesOnce(e.Document);
-                DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
+                // Only run the SQL-backed sync when the active *file* has changed.
+                // DocumentActivated fires for layout-tab switches inside the same DWG
+                // as well as true file switches; comparing Document.Name filters out
+                // the former so we don't hit the database on every tab click.
+                string currentPath = e.Document.Name ?? string.Empty;
+                bool isNewFile = !string.Equals(
+                    _lastSyncedDocumentPath, currentPath, StringComparison.OrdinalIgnoreCase);
 
-                // Re-raise so subscribed UI controls refresh without a DB round-trip
-                // The data is already loaded from when this document was opened/created.
+                if (isNewFile)
+                {
+                    _lastSyncedDocumentPath = currentPath;
+                    AutoUpdateExistingTablesOnce(e.Document);
+                    DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
+                }
+
+                // Always re-raise so UI controls (palette, project nav) rebind instantly —
+                // this is in-memory only and has no performance cost.
                 if (svc.HasProject)
                     svc.RaiseProjectLoaded();
             }
@@ -264,6 +279,14 @@ namespace IWCCadToolsV9.Core
             {
                 try
                 {
+                    // Only check for a path change after save-family commands.
+                    // CommandEnded fires after every AutoCAD operation (including dynamic
+                    // input and object snaps), so without this guard the handler runs on
+                    // every keystroke and causes missed input at the command line.
+                    string cmd = e.GlobalCommandName?.ToUpperInvariant() ?? string.Empty;
+                    if (cmd != "SAVEAS" && cmd != "-SAVEAS" && cmd != "QSAVE")
+                        return;
+
                     string previousPath = doc.UserData[LastKnownPathKey]?.ToString() ?? string.Empty;
                     string currentPath = doc.Name ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(currentPath))
