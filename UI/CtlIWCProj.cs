@@ -1037,6 +1037,79 @@ namespace IWCCadToolsV9.UI
             dgvBomHardware.Rows[e.RowIndex].Cells[e.ColumnIndex].Value = qty.HasValue ? qty.Value.ToString("N0") : string.Empty;
         }
 
+        private void dgvBomMaterials_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            SelectBomRowForContextMenu(dgvBomMaterials, e);
+        }
+
+        private void dgvBomHardware_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            SelectBomRowForContextMenu(dgvBomHardware, e);
+        }
+
+        private static void SelectBomRowForContextMenu(DataGridView grid, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right || e.RowIndex < 0) return;
+
+            if (!grid.Rows[e.RowIndex].Selected)
+            {
+                grid.ClearSelection();
+                grid.Rows[e.RowIndex].Selected = true;
+            }
+
+            if (e.ColumnIndex >= 0)
+                grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+        }
+
+        private void bomMaterials_RemoveAssociation_Click(object? sender, EventArgs e)
+        {
+            RemoveSelectedBomAssociations(dgvBomMaterials, "material", DeleteMaterialDashAssociation);
+        }
+
+        private void bomHardware_RemoveAssociation_Click(object? sender, EventArgs e)
+        {
+            RemoveSelectedBomAssociations(dgvBomHardware, "hardware", DeleteHardwareDashAssociation);
+        }
+
+        private void RemoveSelectedBomAssociations(DataGridView grid, string itemType, Action<int, int> deleteAction)
+        {
+            int projectId = _currentSvc?.Project?.Id ?? 0;
+            int dashId = _currentSvc?.Dash?.DashId ?? 0;
+            if (dashId <= 0) return;
+
+            var ids = grid.SelectedRows
+                .Cast<DataGridViewRow>()
+                .Where(r => r.Tag is int id && id > 0)
+                .Select(r => (int)r.Tag)
+                .Distinct()
+                .ToList();
+
+            if (ids.Count == 0 && grid.CurrentRow?.Tag is int currentId && currentId > 0)
+                ids.Add(currentId);
+
+            if (ids.Count == 0) return;
+
+            string message = ids.Count == 1
+                ? $"Remove this {itemType} association from the current dash?"
+                : $"Remove these {ids.Count} {itemType} associations from the current dash?";
+
+            if (MessageBox.Show(message, "IWC Current BOM", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            try
+            {
+                foreach (int id in ids)
+                    deleteAction(id, dashId);
+
+                LoadCurrentBom(projectId, dashId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to remove {itemType} association.\n\n{ex.Message}",
+                    "IWC Current BOM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private void LoadMetalMaterialLists(SqlConnection conn, int projectId)
         {
             if (dgvBomMetal == null) return;
@@ -1966,6 +2039,30 @@ namespace IWCCadToolsV9.UI
             cmd.ExecuteNonQuery();
         }
 
+        private static void DeleteMaterialDashAssociation(int matId, int dashId)
+        {
+            using var conn = IWCConn.GetSqlConnection();
+            conn.Open();
+            using var cmd = new SqlCommand(@"
+                DELETE FROM dbo.Proj_Mat_Dash
+                WHERE MatID = @mid AND DashID = @did;", conn);
+            cmd.Parameters.AddWithValue("@mid", matId);
+            cmd.Parameters.AddWithValue("@did", dashId);
+            cmd.ExecuteNonQuery();
+        }
+
+        private static void DeleteHardwareDashAssociation(int hdwId, int dashId)
+        {
+            using var conn = IWCConn.GetSqlConnection();
+            conn.Open();
+            using var cmd = new SqlCommand(@"
+                DELETE FROM dbo.Proj_Hdw_Dash
+                WHERE HdwID = @hid AND DashID = @did;", conn);
+            cmd.Parameters.AddWithValue("@hid", hdwId);
+            cmd.Parameters.AddWithValue("@did", dashId);
+            cmd.ExecuteNonQuery();
+        }
+
         private static void UpdateMaterialDashQty(int matId, int dashId, long? qty)
         {
             using var conn = IWCConn.GetSqlConnection();
@@ -2883,6 +2980,10 @@ namespace IWCCadToolsV9.UI
             AddGridColumn(dgvBomMaterials, "MatApprove", "Approve", 10, true);
             dgvBomMaterials.CellDoubleClick += dgvBomMaterials_CellDoubleClick;
             dgvBomMaterials.CellEndEdit += dgvBomMaterials_CellEndEdit;
+            dgvBomMaterials.CellMouseDown += dgvBomMaterials_CellMouseDown;
+            var bomMaterialsMenu = new ContextMenuStrip();
+            bomMaterialsMenu.Items.Add("Remove Material Association", null, bomMaterials_RemoveAssociation_Click);
+            dgvBomMaterials.ContextMenuStrip = bomMaterialsMenu;
 
             dgvBomHardware = CreateBomGrid();
             dgvBomHardware.ReadOnly = false;
@@ -2895,6 +2996,10 @@ namespace IWCCadToolsV9.UI
             AddGridColumn(dgvBomHardware, "HdwApprove", "Approve", 10, true);
             dgvBomHardware.CellDoubleClick += dgvBomHardware_CellDoubleClick;
             dgvBomHardware.CellEndEdit += dgvBomHardware_CellEndEdit;
+            dgvBomHardware.CellMouseDown += dgvBomHardware_CellMouseDown;
+            var bomHardwareMenu = new ContextMenuStrip();
+            bomHardwareMenu.Items.Add("Remove Hardware Association", null, bomHardware_RemoveAssociation_Click);
+            dgvBomHardware.ContextMenuStrip = bomHardwareMenu;
 
             dgvBomMetal = CreateBomGrid();
             dgvBomMetal.ReadOnly = false;
@@ -2972,7 +3077,7 @@ namespace IWCCadToolsV9.UI
             btnBomAddMaterial = new Button { Text = "Add Material", Width = 105, Height = 28 };
             btnBomAddHardware = new Button { Text = "Add Hardware", Width = 110, Height = 28 };
             btnBomInsertHdwTable = new Button { Text = "Insert Hdw Table", Width = 125, Height = 28 };
-            btnBomInsertMatTable = new Button { Text = "Insert Material table", Width = 125, Height = 28 };
+            btnBomInsertMatTable = new Button { Text = "Insert Material Table", Width = 125, Height = 28 };
             btnBomInsertMetalTable = new Button { Text = "Insert Metal Table", Width = 130, Height = 28 };
             btnBomInsertCompList = new Button { Text = "Insert Comp List", Width = 130, Height = 28 };
             btnBomRefresh.Click += btnBomRefresh_Click;

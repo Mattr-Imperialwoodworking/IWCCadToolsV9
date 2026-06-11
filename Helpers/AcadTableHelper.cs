@@ -188,6 +188,668 @@ namespace IWCCadToolsV9.Helpers
             }
         }
 
+
+        /// <summary>
+        /// Creates the narrow two-column titleblock hardware table layout.
+        /// Row 0 is the title row. Each following row is one hardware item with
+        /// variable row height based on multiline description text.
+        /// </summary>
+        public static Table BuildTitleblockHardwareTable(DataTable data, string titleText)
+        {
+            var columns = new[]
+            {
+                new ColumnSpec("#", "HdwNo", 0.75),
+                new ColumnSpec(titleText, "_TitleblockHardwareText", 3.125),
+            };
+
+            return BuildTitleblockTable(data, columns, titleText, BuildHardwareTitleblockText, BuildHardwareGroupHeaderText);
+        }
+
+        /// <summary>
+        /// Updates an existing titleblock hardware table.
+        /// </summary>
+        public static void UpdateTitleblockHardwareTable(Table acadTable, DataTable data, string titleText)
+        {
+            var columns = new[]
+            {
+                new ColumnSpec("#", "HdwNo", 0.75),
+                new ColumnSpec(titleText, "_TitleblockHardwareText", 3.125),
+            };
+
+            UpdateTitleblockTable(acadTable, data, columns, titleText, BuildHardwareTitleblockText, BuildHardwareGroupHeaderText);
+        }
+
+        /// <summary>
+        /// Creates the narrow two-column titleblock material table layout.
+        /// Row 0 is the title row. Each following row is one material item with
+        /// variable row height based on multiline description text.
+        /// </summary>
+        public static Table BuildTitleblockMaterialTable(DataTable data, string titleText)
+        {
+            var columns = new[]
+            {
+                new ColumnSpec("#", "MatNo", 0.75),
+                new ColumnSpec(titleText, "_TitleblockMaterialText", 3.125),
+            };
+
+            return BuildTitleblockTable(data, columns, titleText, BuildMaterialTitleblockText, BuildMaterialGroupHeaderText);
+        }
+
+        /// <summary>
+        /// Updates an existing titleblock material table.
+        /// </summary>
+        public static void UpdateTitleblockMaterialTable(Table acadTable, DataTable data, string titleText)
+        {
+            var columns = new[]
+            {
+                new ColumnSpec("#", "MatNo", 0.75),
+                new ColumnSpec(titleText, "_TitleblockMaterialText", 3.125),
+            };
+
+            UpdateTitleblockTable(acadTable, data, columns, titleText, BuildMaterialTitleblockText, BuildMaterialGroupHeaderText);
+        }
+
+        private static Table BuildTitleblockTable(
+            DataTable data,
+            ColumnSpec[] columns,
+            string titleText,
+            Func<DataRow, string> textBuilder,
+            Func<DataRow, string> groupBuilder)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
+            int rowCount = CountTitleblockRows(data, groupBuilder);
+            double scale = GetDimScale();
+
+            var table = new Table();
+            table.SetSize(rowCount, 2);
+            table.Position = Point3d.Origin;
+            ApplyColumnWidths(table, columns, scale);
+
+            table.SetRowHeight(0, 0.25 * scale);
+            SetCell(table, 0, 0, columns[0].Header, 5.0 / 64.0 * scale, CellAlignment.MiddleCenter);
+            SetCell(table, 0, 1, titleText, 5.0 / 64.0 * scale, CellAlignment.MiddleLeft);
+
+            var groupHeaderRows = PopulateTitleblockRows(table, data, columns, textBuilder, groupBuilder, scale, preserveExistingRowHeights: false, existingRowCount: 0);
+            table.GenerateLayout();
+            ReapplyTitleblockGroupHeaderStyles(table, groupHeaderRows, scale);
+
+            return table;
+        }
+
+        private static void UpdateTitleblockTable(
+            Table acadTable,
+            DataTable data,
+            ColumnSpec[] columns,
+            string titleText,
+            Func<DataRow, string> textBuilder,
+            Func<DataRow, string> groupBuilder)
+        {
+            if (acadTable == null) throw new ArgumentNullException(nameof(acadTable));
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
+            int expectedRows = CountTitleblockRows(data, groupBuilder);
+            int existingRowCount = acadTable.Rows.Count;
+            if (acadTable.Rows.Count != expectedRows || acadTable.Columns.Count != 2)
+                acadTable.SetSize(expectedRows, 2);
+
+            double scale = GetDimScale();
+            ApplyColumnWidths(acadTable, columns, scale);
+
+            acadTable.SetRowHeight(0, 0.25 * scale);
+            SetCell(acadTable, 0, 0, columns[0].Header, 5.0 / 64.0 * scale, CellAlignment.MiddleCenter);
+            SetCell(acadTable, 0, 1, titleText, 5.0 / 64.0 * scale, CellAlignment.MiddleLeft);
+
+            var groupHeaderRows = PopulateTitleblockRows(acadTable, data, columns, textBuilder, groupBuilder, scale, preserveExistingRowHeights: true, existingRowCount: existingRowCount);
+            acadTable.GenerateLayout();
+            ReapplyTitleblockGroupHeaderStyles(acadTable, groupHeaderRows, scale);
+        }
+
+        private static List<int> PopulateTitleblockRows(
+            Table table,
+            DataTable data,
+            ColumnSpec[] columns,
+            Func<DataRow, string> textBuilder,
+            Func<DataRow, string> groupBuilder,
+            double scale,
+            bool preserveExistingRowHeights,
+            int existingRowCount)
+        {
+            double textHeight = 5.0 / 64.0 * scale;
+            int tableRow = 1;
+            string? currentGroup = null;
+            var groupHeaderRows = new List<int>();
+
+            for (int r = 0; r < data.Rows.Count; r++)
+            {
+                DataRow row = data.Rows[r];
+                string groupText = NormalizeGroupText(groupBuilder(row));
+
+                if (!string.Equals(currentGroup, groupText, StringComparison.OrdinalIgnoreCase))
+                {
+                    currentGroup = groupText;
+                    SetTitleblockGroupHeaderRow(table, tableRow, groupText, textHeight, scale);
+                    groupHeaderRows.Add(tableRow);
+                    tableRow++;
+                }
+
+                string key = GetSafeField(row, columns[0].DataCol);
+                string detailText = textBuilder(row);
+                double rowHeight = EstimateTitleblockRowHeight(detailText, scale);
+
+                // Insert uses a calculated starting height. Update/refresh should not
+                // overwrite a row height that the user has manually adjusted in the
+                // drawing, because that caused refreshed borders to jump back to the
+                // original generated size. Newly added rows still receive the calculated
+                // height.
+                if (!preserveExistingRowHeights || tableRow >= existingRowCount || table.Rows[tableRow].Height <= 0)
+                    table.SetRowHeight(tableRow, rowHeight);
+
+                SetCell(table, tableRow, 0, key, textHeight, CellAlignment.MiddleCenter);
+                SetCell(table, tableRow, 1, detailText, textHeight, CellAlignment.MiddleLeft);
+                tableRow++;
+            }
+
+            return groupHeaderRows;
+        }
+
+        private static void ReapplyTitleblockGroupHeaderStyles(Table table, List<int> groupHeaderRows, double scale)
+        {
+            if (groupHeaderRows == null || groupHeaderRows.Count == 0) return;
+
+            // GenerateLayout() can reset cell styles back to the row default ("Data").
+            // Re-stamp every group header row with "Header" after layout is complete.
+            // This is the authoritative final pass — nothing runs after this.
+            foreach (int row in groupHeaderRows)
+            {
+                if (row < 0 || row >= table.Rows.Count) continue;
+
+                table.SetRowHeight(row, 0.25 * scale);
+                ApplyHeaderCellStyleDirect(table, row, 0);
+                ApplyHeaderCellStyleDirect(table, row, 1);
+            }
+        }
+
+        private static int CountTitleblockRows(DataTable data, Func<DataRow, string> groupBuilder)
+        {
+            int count = 1; // top title row
+            string? currentGroup = null;
+
+            foreach (DataRow row in data.Rows)
+            {
+                string groupText = NormalizeGroupText(groupBuilder(row));
+                if (!string.Equals(currentGroup, groupText, StringComparison.OrdinalIgnoreCase))
+                {
+                    currentGroup = groupText;
+                    count++; // group header row
+                }
+
+                count++; // item row
+            }
+
+            return count;
+        }
+
+        private static void SetTitleblockGroupHeaderRow(Table table, int row, string groupText, double textHeight, double scale)
+        {
+            table.SetRowHeight(row, 0.25 * scale);
+
+            // Order matters in AutoCAD 2025:
+            //   1. Merge cells first (MergeCells resets cell style to row default).
+            //   2. Write content via SetCell (also resets inherited cell style).
+            //   3. Apply Header style LAST so nothing can overwrite it.
+            // The "Row style" value shown in the Properties palette maps to the
+            // cell-level Style string on each cell in the row — there is no
+            // separate writable row-type property in the 2025 managed API.
+            try { table.MergeCells(CellRange.Create(table, row, 0, row, 1)); } catch { }
+            SetCell(table, row, 0, groupText, textHeight, CellAlignment.MiddleCenter);
+
+            // Apply after content is written so AutoCAD cannot reset it.
+            ApplyHeaderCellStyleDirect(table, row, 0);
+            ApplyHeaderCellStyleDirect(table, row, 1);
+        }
+
+        private static void ApplyHeaderCellStyleDirect(Table table, int row, int col)
+        {
+            // TableCell is a VALUE TYPE (struct) in the AutoCAD managed API.
+            // Assigning to table.Cells[row, col].Style modifies a temporary copy —
+            // the change is never written back to the table's database object.
+            //
+            // The correct path is Table.SetCellStyle(int row, int col, string styleName)
+            // which is an instance method on Table that writes directly through to the
+            // underlying AcDbTable record.
+            //
+            // We try "GroupHeader" first (defined in IWC_Material table style) then
+            // "Header" as a fallback for drawings using the standard AutoCAD table style.
+            foreach (string styleName in new[] { "GroupHeader", "Header" })
+            {
+                // Path 1: Direct method call — Table.SetCellStyle(row, col, styleName).
+                // This is the correct API for AutoCAD 2025 managed wrapper.
+                try
+                {
+                    table.SetCellStyle(row, col, styleName);
+                    return;
+                }
+                catch { }
+
+                // Path 2: Reflection scan for SetCellStyle overloads.
+                // Handles cases where the overload resolution differs by AutoCAD version.
+                try
+                {
+                    var methods = table.GetType().GetMethods(
+                        System.Reflection.BindingFlags.Instance |
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic);
+
+                    foreach (var method in methods)
+                    {
+                        if (!string.Equals(method.Name, "SetCellStyle", StringComparison.Ordinal))
+                            continue;
+                        var p = method.GetParameters();
+                        if (p.Length == 3
+                            && p[0].ParameterType == typeof(int)
+                            && p[1].ParameterType == typeof(int)
+                            && p[2].ParameterType == typeof(string))
+                        {
+                            method.Invoke(table, new object[] { row, col, styleName });
+                            return;
+                        }
+                    }
+                }
+                catch { }
+
+                // Path 3: Reflection fallback for CellRange-based SetCellStyle overloads
+                // that differ in signature from the (int, int, string) form.
+                try
+                {
+                    var range = CellRange.Create(table, row, col, row, col);
+                    var methods = table.GetType().GetMethods(
+                        System.Reflection.BindingFlags.Instance |
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic);
+                    foreach (var method in methods)
+                    {
+                        if (!string.Equals(method.Name, "SetCellStyle", StringComparison.Ordinal))
+                            continue;
+                        var p = method.GetParameters();
+                        if (p.Length == 2
+                            && p[0].ParameterType == typeof(CellRange)
+                            && p[1].ParameterType == typeof(string))
+                        {
+                            method.Invoke(table, new object[] { range, styleName });
+                            return;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private static void ApplyHeaderRowStyle(Table table, int row)
+        {
+            // Preferred path when the AutoCAD API exposes a row type setter.
+            TryInvokeTableSetRowType(table, row, "HeaderRow");
+            TryInvokeTableSetRowType(table, row, "Header");
+
+            // Some AutoCAD versions expose row type as a property on the row object.
+            // Set both string-style and enum-style properties because the wrapper
+            // differs by release and by table state.
+            TrySetRowTypeProperty(table, row, "HeaderRow");
+            TrySetRowTypeProperty(table, row, "Header");
+
+            // Fallback paths for AutoCAD versions that expose row style through
+            // the Rows collection rather than through SetRowType.  These are
+            // intentionally reflection/dynamic based so the add-in stays buildable
+            // across the AutoCAD 2025 .NET API surface.
+            TrySetRowStyleProperty(table, row, "Header");
+            TrySetRowStyleProperty(table, row, "HeaderRow");
+
+            // AutoCAD's default row 1 is a real Header row.  When available, copy
+            // its row-type/style values onto later group rows after they have been
+            // created; this fixes the case where only the first group header was
+            // reporting as Header and later group rows stayed Data.
+            TryCopyHeaderRowStyle(table, row);
+        }
+
+        private static void ApplyHeaderCellStyle(Table table, int row, int col)
+        {
+            ApplyHeaderCellStyleDirect(table, row, col);
+        }
+
+        private static void TryInvokeTableSetCellStyle(Table table, int row, int col, string styleName)
+        {
+            try
+            {
+                var methods = table.GetType().GetMethods(
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+
+                foreach (var method in methods)
+                {
+                    if (!string.Equals(method.Name, "SetCellStyle", StringComparison.Ordinal))
+                        continue;
+
+                    var parameters = method.GetParameters();
+                    if (parameters.Length != 3)
+                        continue;
+
+                    if (parameters[0].ParameterType == typeof(int) &&
+                        parameters[1].ParameterType == typeof(int) &&
+                        parameters[2].ParameterType == typeof(string))
+                    {
+                        method.Invoke(table, new object[] { row, col, styleName });
+                        return;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void TryInvokeTableSetRowType(Table table, int row, string enumName)
+        {
+            try
+            {
+                var methods = table.GetType().GetMethods(
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+
+                foreach (var method in methods)
+                {
+                    if (!string.Equals(method.Name, "SetRowType", StringComparison.Ordinal))
+                        continue;
+
+                    var parameters = method.GetParameters();
+                    if (parameters.Length < 2 || parameters.Length > 3)
+                        continue;
+
+                    Type enumType = parameters[^1].ParameterType;
+                    if (!enumType.IsEnum)
+                        continue;
+
+                    object headerValue;
+                    try
+                    {
+                        headerValue = Enum.Parse(enumType, enumName, ignoreCase: true);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (parameters.Length == 2 && parameters[0].ParameterType == typeof(int))
+                    {
+                        method.Invoke(table, new object[] { row, headerValue });
+                        return;
+                    }
+
+                    if (parameters.Length == 3 &&
+                        parameters[0].ParameterType == typeof(int) &&
+                        parameters[1].ParameterType == typeof(int))
+                    {
+                        method.Invoke(table, new object[] { row, row, headerValue });
+                        return;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void TrySetRowTypeProperty(Table table, int row, string enumName)
+        {
+            TrySetRowEnumProperty(table, row, "RowType", enumName);
+            TrySetRowEnumProperty(table, row, "Type", enumName);
+        }
+
+        private static void TrySetRowEnumProperty(Table table, int row, string propertyName, string enumName)
+        {
+            try
+            {
+                object tableRow = table.Rows[row];
+                var prop = tableRow.GetType().GetProperty(propertyName,
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+
+                if (prop == null || !prop.CanWrite || !prop.PropertyType.IsEnum) return;
+
+                object value;
+                try
+                {
+                    value = Enum.Parse(prop.PropertyType, enumName, ignoreCase: true);
+                }
+                catch
+                {
+                    return;
+                }
+
+                prop.SetValue(tableRow, value);
+            }
+            catch { }
+        }
+
+        private static void TryCopyHeaderRowStyle(Table table, int row)
+        {
+            if (row == 1 || table.Rows.Count <= 1) return;
+
+            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "RowType");
+            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "Type");
+            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "Style");
+            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "CellStyle");
+            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "StyleName");
+            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "RowStyle");
+        }
+
+        private static void TryCopyRowProperty(Table table, int sourceRow, int targetRow, string propertyName)
+        {
+            try
+            {
+                object src = table.Rows[sourceRow];
+                object dst = table.Rows[targetRow];
+                var srcProp = src.GetType().GetProperty(propertyName,
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+                var dstProp = dst.GetType().GetProperty(propertyName,
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+
+                if (srcProp == null || dstProp == null || !dstProp.CanWrite) return;
+                object? value = srcProp.GetValue(src);
+                if (value == null) return;
+                if (!dstProp.PropertyType.IsAssignableFrom(srcProp.PropertyType)) return;
+                dstProp.SetValue(dst, value);
+            }
+            catch { }
+        }
+
+        private static void TrySetRowStyleProperty(Table table, int row, string styleName)
+        {
+            try
+            {
+                dynamic tableRow = table.Rows[row];
+                tableRow.Style = styleName;
+            }
+            catch { }
+
+            try
+            {
+                dynamic tableRow = table.Rows[row];
+                tableRow.CellStyle = styleName;
+            }
+            catch { }
+
+            try
+            {
+                dynamic tableRow = table.Rows[row];
+                tableRow.StyleName = styleName;
+            }
+            catch { }
+
+            try
+            {
+                dynamic tableRow = table.Rows[row];
+                tableRow.RowStyle = styleName;
+            }
+            catch { }
+        }
+
+        private static void TrySetCellStyleProperty(Table table, int row, int col, string styleName)
+        {
+            try
+            {
+                dynamic cell = table.Cells[row, col];
+                cell.Style = styleName;
+            }
+            catch { }
+
+            try
+            {
+                dynamic cell = table.Cells[row, col];
+                cell.CellStyle = styleName;
+            }
+            catch { }
+
+            try
+            {
+                dynamic cell = table.Cells[row, col];
+                cell.StyleName = styleName;
+            }
+            catch { }
+        }
+
+        private static string NormalizeGroupText(string groupText)
+        {
+            return string.IsNullOrWhiteSpace(groupText) ? "UNGROUPED" : groupText.Trim();
+        }
+
+        private static double EstimateTitleblockRowHeight(string detailText, double scale)
+        {
+            int lineCount = CountTextLines(detailText);
+
+            // Titleblock tables use 5/64 text. A row-height factor of ~0.145
+            // per line keeps multiline rows compact while still allowing the
+            // row to grow with the amount of text.
+            return Math.Max(0.35, 0.145 * lineCount + 0.12) * scale;
+        }
+
+        private static string BuildHardwareGroupHeaderText(DataRow row)
+        {
+            // Titleblock hardware group rows should use the hardware group tag
+            // followed by the group description/name, e.g. "H01 - PULLS".
+            // In the current compile views/stored procedure, HdwGroupNo is the
+            // user-facing group name/description and HdwGroupTag is the short tag.
+            string groupTag = GetSafeField(row, "HdwGroupTag");
+            string groupDesc = GetFirstSafeField(row, "HdwGroupNo", "HdwGroupDesc", "HdwGroup");
+
+            if (!string.IsNullOrWhiteSpace(groupTag) && !string.IsNullOrWhiteSpace(groupDesc))
+                return $"{groupTag} - {groupDesc}";
+
+            return !string.IsNullOrWhiteSpace(groupTag) ? groupTag : groupDesc;
+        }
+
+        private static string BuildMaterialGroupHeaderText(DataRow row)
+        {
+            string groupNo = GetFirstSafeField(row, "MatGroupNo", "MatGroup", "MatGroupTag");
+            string groupDesc = GetSafeField(row, "MatGroupDesc");
+
+            if (!string.IsNullOrWhiteSpace(groupNo) && !string.IsNullOrWhiteSpace(groupDesc))
+                return $"{groupNo} - {groupDesc}";
+
+            return !string.IsNullOrWhiteSpace(groupNo) ? groupNo : groupDesc;
+        }
+
+        private static string BuildHardwareTitleblockText(DataRow row)
+        {
+            var lines = new List<string>();
+            AddLine(lines, GetSafeField(row, "HdwDesc"));
+
+            string qty = GetSafeField(row, "HdwQty");
+            string unit = GetSafeField(row, "HdwUnit");
+            if (!string.IsNullOrWhiteSpace(qty) || !string.IsNullOrWhiteSpace(unit))
+                AddLine(lines, $"QTY: {qty}{(string.IsNullOrWhiteSpace(unit) ? string.Empty : ", " + unit)}");
+
+            string approval = FormatDateOrText(GetSafeField(row, "HdwApprove"));
+            if (!string.IsNullOrWhiteSpace(approval))
+                AddLine(lines, $"APPROVAL: {approval}");
+
+            return string.Join("\r\n", lines);
+        }
+
+        private static string BuildMaterialTitleblockText(DataRow row)
+        {
+            var lines = new List<string>();
+            AddLine(lines, GetSafeField(row, "MatDesc"));
+
+            string qty = GetSafeField(row, "MatQty");
+            string units = GetSafeField(row, "MatUnits");
+            if (!string.IsNullOrWhiteSpace(qty) || !string.IsNullOrWhiteSpace(units))
+                AddLine(lines, $"QTY: {qty}{(string.IsNullOrWhiteSpace(units) ? string.Empty : ", " + units)}");
+
+            string approval = FormatDateOrText(GetSafeField(row, "MatApprove"));
+            if (!string.IsNullOrWhiteSpace(approval))
+                AddLine(lines, $"APPROVAL: {approval}");
+
+            return string.Join("\r\n", lines);
+        }
+
+        private static void AddLine(List<string> lines, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                lines.Add(value.Trim());
+        }
+
+        private static string GetFirstSafeField(DataRow row, params string[] columnNames)
+        {
+            foreach (string columnName in columnNames)
+            {
+                string value = GetSafeField(row, columnName);
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+
+            return string.Empty;
+        }
+
+        private static string GetSafeField(DataRow row, string columnName)
+        {
+            if (row.Table == null || !row.Table.Columns.Contains(columnName))
+                return string.Empty;
+
+            object? value = row[columnName];
+            if (value == null || value == DBNull.Value)
+                return string.Empty;
+
+            return Convert.ToString(value) ?? string.Empty;
+        }
+
+        private static string FormatDateOrText(string value)
+        {
+            if (DateTime.TryParse(value, out var dt))
+                return dt.ToString("MM/dd/yyyy");
+
+            return value;
+        }
+
+        private static int CountTextLines(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return 1;
+
+            const int approximateCharsPerLine = 34;
+            string normalized = text.Replace("\r\n", "\n").Replace("\r", "\n");
+            int total = 0;
+
+            foreach (string line in normalized.Split('\n'))
+            {
+                int len = Math.Max(1, line.Length);
+                total += Math.Max(1, (int)Math.Ceiling(len / (double)approximateCharsPerLine));
+            }
+
+            return Math.Max(1, total);
+        }
+
         // ---------------------------------------------------------------------------
         // Private helpers
         // ---------------------------------------------------------------------------

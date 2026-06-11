@@ -16,6 +16,13 @@ namespace IWCCadToolsV9.Helpers
         public const string MaterialTableKey  = "IWC_MaterialTableId";
         public const string MetalTableKey     = "IWC_MetalTableId";
 
+        public const string HardwareTableFormatKey = "IWC_HardwareTableFormat";
+        public const string MaterialTableFormatKey = "IWC_MaterialTableFormat";
+        public const string MetalTableFormatKey     = "IWC_MetalTableFormat";
+
+        public const string TableFormatWide       = "Wide";
+        public const string TableFormatTitleblock = "Titleblock";
+
         // ---------------------------------------------------------------------------
         // Store
         // ---------------------------------------------------------------------------
@@ -28,6 +35,25 @@ namespace IWCCadToolsV9.Helpers
             string propertyKey = HardwareTableKey)
         {
             AcadFilePropHelper.SetCustomProperty(propertyKey, tableId.Handle.ToString());
+        }
+
+        /// <summary>
+        /// Stores the selected table layout format for later update/auto-refresh.
+        /// </summary>
+        public static void StoreTableFormat(string formatKey, string format)
+        {
+            AcadFilePropHelper.SetCustomProperty(formatKey, format);
+        }
+
+        /// <summary>
+        /// Retrieves the selected table layout format. Older drawings default to Wide.
+        /// </summary>
+        public static string RetrieveTableFormat(string formatKey)
+        {
+            var value = AcadFilePropHelper.GetCustomProperty(formatKey);
+            return string.Equals(value, TableFormatTitleblock, StringComparison.OrdinalIgnoreCase)
+                ? TableFormatTitleblock
+                : TableFormatWide;
         }
 
         // ---------------------------------------------------------------------------

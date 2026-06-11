@@ -3,6 +3,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
+using IWCCadToolsV9.Core;
 using IWCCadToolsV9.Data;
 using IWCCadToolsV9.Helpers;
 using Microsoft.Data.SqlClient;
@@ -53,7 +54,7 @@ namespace IWCCadToolsV9.Commands
                             var data = QueryMaterialTable(dashId);
                             if (data != null)
                             {
-                                anyUpdated |= TryUpdateAcadTable(db, materialTableId, data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt()), "material", ed, quiet);
+                                anyUpdated |= TryUpdateBomTable(db, materialTableId, data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt()), "material", ed, quiet, TableReferenceHelper.MaterialTableFormatKey);
                             }
                         }
                     }
@@ -67,7 +68,7 @@ namespace IWCCadToolsV9.Commands
                             var data = QueryHardwareTable(dash);
                             if (data != null)
                             {
-                                anyUpdated |= TryUpdateAcadTable(db, hardwareTableId, data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash), "hardware", ed, quiet);
+                                anyUpdated |= TryUpdateBomTable(db, hardwareTableId, data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash), "hardware", ed, quiet, TableReferenceHelper.HardwareTableFormatKey);
                             }
                         }
                     }
@@ -97,6 +98,38 @@ namespace IWCCadToolsV9.Commands
                 else
                     ed.WriteMessage($"\nIWC automatic table update failed — {ex.Message}\n");
             }
+        }
+
+        private static bool TryUpdateBomTable(Database db, ObjectId tableId, DataTable data, AcadTableHelper.ColumnSpec[] columns, string titleText, string tableName, Editor ed, bool quiet, string formatKey)
+        {
+            string format = TableReferenceHelper.RetrieveTableFormat(formatKey);
+            if (!string.Equals(format, TableReferenceHelper.TableFormatTitleblock, System.StringComparison.OrdinalIgnoreCase))
+                return TryUpdateAcadTable(db, tableId, data, columns, titleText, tableName, ed, quiet);
+
+            if (data.Rows.Count == 0)
+            {
+                if (!quiet) ed.WriteMessage($"\nNo {tableName} data found for this dash.\n");
+                return false;
+            }
+
+            using var tr = db.TransactionManager.StartTransaction();
+            var acadTable = tr.GetObject(tableId, OpenMode.ForWrite, false) as Table;
+            if (acadTable == null)
+            {
+                if (!quiet) ed.WriteMessage($"\nStored {tableName} table reference was not found.\n");
+                return false;
+            }
+
+            AcadTableHelper.ApplyPreferredTableStyle(acadTable, db, tr);
+            if (string.Equals(formatKey, TableReferenceHelper.HardwareTableFormatKey, System.StringComparison.OrdinalIgnoreCase))
+                AcadTableHelper.UpdateTitleblockHardwareTable(acadTable, data, "IWC HARDWARE:");
+            else
+                AcadTableHelper.UpdateTitleblockMaterialTable(acadTable, data, "IWC MATERIAL:");
+
+            tr.Commit();
+
+            if (!quiet) ed.WriteMessage($"\n{System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(tableName)} table updated.\n");
+            return true;
         }
 
         private static bool TryUpdateAcadTable(Database db, ObjectId tableId, DataTable data, AcadTableHelper.ColumnSpec[] columns, string titleText, string tableName, Editor ed, bool quiet)
@@ -132,19 +165,144 @@ namespace IWCCadToolsV9.Commands
 
         private static string? ResolveDashFromPropertiesNoPrompt()
         {
-            string? projNum = AcadFilePropHelper.GetCustomProperty("IWC_ProjNo");
-            string? seriesNo = AcadFilePropHelper.GetCustomProperty("IWC_SeriesNo");
+            // Prefer the already-loaded per-document project context when the command
+            // is launched from the palette. This keeps the Insert Hdw Table workflow
+            // consistent with Insert Material Table and avoids prompting when the
+            // current drawing/palette already knows the active project and dash.
+            string? dashFromContext = ResolveDashFromCurrentProjectContext();
+            if (!string.IsNullOrWhiteSpace(dashFromContext))
+                return dashFromContext;
 
+            string? projNum = AcadFilePropHelper.GetCustomProperty(DwgPropertyStore.KeyProjNum);
+            string? seriesNo = AcadFilePropHelper.GetCustomProperty(DwgPropertyStore.KeyDashNum);
+
+            string? dash = BuildDashDisplay(projNum, seriesNo);
+            if (!string.IsNullOrWhiteSpace(dash))
+                return dash;
+
+            // Some drawings have the stable project/dash IDs saved but not the
+            // display numbers. Resolve the dash display from the database so the
+            // hardware stored procedure can run without prompting.
+            string? projectIdText = AcadFilePropHelper.GetCustomProperty(DwgPropertyStore.KeyProjectId);
+            string? dashIdText = AcadFilePropHelper.GetCustomProperty(DwgPropertyStore.KeyDashId);
+            if (!int.TryParse(dashIdText, out int dashId) || dashId <= 0)
+                return null;
+
+            try
+            {
+                using var conn = new IWCConn();
+                conn.DBConnect();
+                using var cmd = new SqlCommand(@"
+                    SELECT TOP 1 IDNum, Dash_Num
+                    FROM (
+                        SELECT 0 AS SortOrder, IDNum, Dash_Num
+                        FROM dbo.Proj_DashCompileReportActive
+                        WHERE DashID = @dashId
+                        UNION ALL
+                        SELECT 1 AS SortOrder, IDNum, Dash_Num
+                        FROM dbo.Proj_DashCompileReport
+                        WHERE DashID = @dashId
+                    ) d
+                    ORDER BY SortOrder;", conn.OpenConn);
+                cmd.Parameters.AddWithValue("@dashId", dashId);
+
+                using var rdr = cmd.ExecuteReader();
+                if (rdr.Read())
+                    return BuildDashDisplay(rdr["IDNum"]?.ToString(), rdr["Dash_Num"]?.ToString());
+            }
+            catch
+            {
+                // Quiet fallback; callers can still prompt if needed.
+            }
+
+            // Last-chance fallback: if IWC_ProjNo was missing but IWC_ID is present,
+            // resolve the project number separately and combine it with IWC_SeriesNo.
+            if (!string.IsNullOrWhiteSpace(seriesNo) && int.TryParse(projectIdText, out int projectId) && projectId > 0)
+            {
+                try
+                {
+                    using var conn = new IWCConn();
+                    conn.DBConnect();
+                    using var cmd = new SqlCommand("SELECT TOP 1 IDNum FROM dbo.Proj WHERE ID = @projectId;", conn.OpenConn);
+                    cmd.Parameters.AddWithValue("@projectId", projectId);
+                    var resolvedProjNum = cmd.ExecuteScalar()?.ToString();
+                    return BuildDashDisplay(resolvedProjNum, seriesNo);
+                }
+                catch
+                {
+                    // Quiet fallback; callers can still prompt if needed.
+                }
+            }
+
+            return null;
+        }
+
+        private static string? ResolveDashFromCurrentProjectContext()
+        {
+            try
+            {
+                var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+                if (doc == null) return null;
+
+                var svc = ProjectContextService.GetOrCreate(doc);
+                if (!svc.HasDash) return null;
+
+                string? projectNumber = svc.Project?.IdNum;
+                if (string.IsNullOrWhiteSpace(projectNumber))
+                    projectNumber = svc.Dash?.ProjectIdNum;
+
+                string? dashNumber = svc.Dash?.DashNum;
+                string? dash = BuildDashDisplay(projectNumber, dashNumber);
+                if (!string.IsNullOrWhiteSpace(dash))
+                    return dash;
+
+                // If the dash number already includes the project prefix, use it as-is.
+                if (!string.IsNullOrWhiteSpace(dashNumber) && dashNumber.Contains('-'))
+                    return dashNumber.Trim();
+            }
+            catch
+            {
+                // Context may not be available when the command is run outside the palette.
+            }
+
+            return null;
+        }
+
+        private static string? BuildDashDisplay(string? projNum, string? seriesNo)
+        {
             if (string.IsNullOrWhiteSpace(projNum) || string.IsNullOrWhiteSpace(seriesNo))
                 return null;
 
             projNum = projNum.Trim();
             seriesNo = seriesNo.Trim();
-            if (seriesNo.Length < 4)
+
+            // Legacy 3-digit dash numbers should still display as 4 digits,
+            // but valid IWC dash numbers are not limited to four characters.
+            // Examples: 5884-0510 and 5834-50202 are both valid display values
+            // for the hardware stored procedure.
+            if (seriesNo.Length < 4 && seriesNo.All(char.IsDigit))
                 seriesNo = seriesNo.PadLeft(4, '0');
 
             var dash = $"{projNum}-{seriesNo}";
-            return dash.Length == 9 ? dash : null;
+            return IsValidDashDisplay(dash) ? dash : null;
+        }
+
+        private static bool IsValidDashDisplay(string? dash)
+        {
+            if (string.IsNullOrWhiteSpace(dash)) return false;
+
+            dash = dash.Trim();
+            int hyphenIndex = dash.IndexOf('-');
+            if (hyphenIndex <= 0 || hyphenIndex >= dash.Length - 1)
+                return false;
+
+            string projectPart = dash[..hyphenIndex];
+            string dashPart = dash[(hyphenIndex + 1)..];
+
+            // Keep validation intentionally light.  Hardware lookup uses the
+            // project-dash display string, and dash numbers can be more than
+            // four characters.  Reject only clearly malformed values.
+            return projectPart.Length >= 1 && dashPart.Length >= 1;
         }
 
         // =========================================================================
@@ -158,8 +316,13 @@ namespace IWCCadToolsV9.Commands
                           .DocumentManager.MdiActiveDocument;
             var ed = doc.Editor;
 
-            string? dash = ResolveDash(ed);
+            // Match the material-table workflow: use the current drawing's saved
+            // project/dash properties first and only prompt if this DWG is not linked.
+            string? dash = ResolveDashFromPropertiesNoPrompt() ?? ResolveDash(ed);
             if (dash == null) return;
+
+            string? format = PromptBomTableFormat(ed);
+            if (format == null) return;
 
             var ppr = ed.GetPoint(new PromptPointOptions("\nSelect insertion point for hardware table:"));
             if (ppr.Status != PromptStatus.OK) return;
@@ -168,8 +331,11 @@ namespace IWCCadToolsV9.Commands
             if (data == null || data.Rows.Count == 0)
             { ed.WriteMessage($"\nNo hardware found for Dash {dash}."); return; }
 
-            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash));
-            InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.HardwareTableKey);
+            var table = string.Equals(format, TableReferenceHelper.TableFormatTitleblock, System.StringComparison.OrdinalIgnoreCase)
+                ? AcadTableHelper.BuildTitleblockHardwareTable(data, "IWC HARDWARE:")
+                : AcadTableHelper.BuildTable(data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash));
+
+            InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.HardwareTableKey, TableReferenceHelper.HardwareTableFormatKey, format);
             ed.WriteMessage("\nHardware table inserted.");
         }
 
@@ -184,7 +350,7 @@ namespace IWCCadToolsV9.Commands
             var tableId = TableReferenceHelper.RetrieveTableReference(db, TableReferenceHelper.HardwareTableKey);
             if (tableId.IsNull) { ed.WriteMessage("\nNo hardware table reference found."); return; }
 
-            string? dash = ResolveDash(ed);
+            string? dash = ResolveDashFromPropertiesNoPrompt() ?? ResolveDash(ed);
             if (dash == null) return;
 
             var data = QueryHardwareTable(dash);
@@ -195,7 +361,11 @@ namespace IWCCadToolsV9.Commands
             var acadTable = tr.GetObject(tableId, OpenMode.ForWrite) as Table;
             if (acadTable == null) { ed.WriteMessage("\nHardware table not found."); return; }
 
-            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash));
+            AcadTableHelper.ApplyPreferredTableStyle(acadTable, db, tr);
+            if (string.Equals(TableReferenceHelper.RetrieveTableFormat(TableReferenceHelper.HardwareTableFormatKey), TableReferenceHelper.TableFormatTitleblock, System.StringComparison.OrdinalIgnoreCase))
+                AcadTableHelper.UpdateTitleblockHardwareTable(acadTable, data, "IWC HARDWARE:");
+            else
+                AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.HardwareCols, BuildTableTitle("HARDWARE TABLE", dash));
             tr.Commit();
             ed.WriteMessage("\nHardware table updated.");
         }
@@ -216,6 +386,9 @@ namespace IWCCadToolsV9.Commands
                 dashId = Prompt(ed, "Enter Section ID for DashID:");
             if (string.IsNullOrEmpty(dashId)) return;
 
+            string? format = PromptBomTableFormat(ed);
+            if (format == null) return;
+
             var ppr = ed.GetPoint(new PromptPointOptions("\nSelect insertion point for material table:"));
             if (ppr.Status != PromptStatus.OK) return;
 
@@ -223,8 +396,11 @@ namespace IWCCadToolsV9.Commands
             if (data == null || data.Rows.Count == 0)
             { ed.WriteMessage($"\nNo materials found for DashID {dashId}."); return; }
 
-            var table = AcadTableHelper.BuildTable(data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
-            InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.MaterialTableKey);
+            var table = string.Equals(format, TableReferenceHelper.TableFormatTitleblock, System.StringComparison.OrdinalIgnoreCase)
+                ? AcadTableHelper.BuildTitleblockMaterialTable(data, "IWC MATERIAL:")
+                : AcadTableHelper.BuildTable(data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
+
+            InsertAndStoreRef(doc, table, ppr.Value, TableReferenceHelper.MaterialTableKey, TableReferenceHelper.MaterialTableFormatKey, format);
             ed.WriteMessage("\nMaterial table inserted.");
         }
 
@@ -252,7 +428,11 @@ namespace IWCCadToolsV9.Commands
             var acadTable = tr.GetObject(tableId, OpenMode.ForWrite) as Table;
             if (acadTable == null) { ed.WriteMessage("\nMaterial table not found."); return; }
 
-            AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
+            AcadTableHelper.ApplyPreferredTableStyle(acadTable, db, tr);
+            if (string.Equals(TableReferenceHelper.RetrieveTableFormat(TableReferenceHelper.MaterialTableFormatKey), TableReferenceHelper.TableFormatTitleblock, System.StringComparison.OrdinalIgnoreCase))
+                AcadTableHelper.UpdateTitleblockMaterialTable(acadTable, data, "IWC MATERIAL:");
+            else
+                AcadTableHelper.UpdateTable(acadTable, data, AcadTableHelper.MaterialCols, BuildTableTitle("MATERIALS TABLE", ResolveDashFromPropertiesNoPrompt() ?? dashId));
             tr.Commit();
             ed.WriteMessage("\nMaterial table updated.");
         }
@@ -390,18 +570,18 @@ namespace IWCCadToolsV9.Commands
             if (seriesNo.Length < 4)
                 seriesNo = seriesNo.PadLeft(4, '0');
 
-            string dash = $"{projNum}-{seriesNo}";
-            if (dash.Length != 9)
+            string? dash = BuildDashDisplay(projNum, seriesNo);
+            if (!IsValidDashDisplay(dash))
             {
-                dash = Prompt(ed, "Enter Project-Series Number (format XXXX-YYYY):") ?? string.Empty;
-                if (dash.Length != 9) return null;
+                dash = Prompt(ed, "Enter Project-Series Number (format XXXX-YYYY or XXXX-YYYYY):") ?? string.Empty;
+                if (!IsValidDashDisplay(dash)) return null;
             }
             return dash;
         }
 
         private static void InsertAndStoreRef(
             Autodesk.AutoCAD.ApplicationServices.Document doc,
-            Table table, Point3d insPt, string refKey)
+            Table table, Point3d insPt, string refKey, string? formatKey = null, string? format = null)
         {
             var db = doc.Database;
             using var tr = db.TransactionManager.StartTransaction();
@@ -412,7 +592,29 @@ namespace IWCCadToolsV9.Commands
             btr.AppendEntity(table);
             tr.AddNewlyCreatedDBObject(table, true);
             TableReferenceHelper.StoreTableReference(db, table.ObjectId, refKey);
+            if (!string.IsNullOrWhiteSpace(formatKey) && !string.IsNullOrWhiteSpace(format))
+                TableReferenceHelper.StoreTableFormat(formatKey, format);
             tr.Commit();
+        }
+
+        private static string? PromptBomTableFormat(Editor ed)
+        {
+            var options = new PromptKeywordOptions("\nSelect table format [Titleblock/Wide] <Wide>:");
+            options.Keywords.Add("Titleblock");
+            options.Keywords.Add("Wide");
+            options.Keywords.Default = "Wide";
+            options.AllowNone = true;
+
+            var result = ed.GetKeywords(options);
+            if (result.Status == PromptStatus.None || string.IsNullOrWhiteSpace(result.StringResult))
+                return TableReferenceHelper.TableFormatWide;
+
+            if (result.Status != PromptStatus.OK)
+                return null;
+
+            return result.StringResult.Equals("Titleblock", System.StringComparison.OrdinalIgnoreCase)
+                ? TableReferenceHelper.TableFormatTitleblock
+                : TableReferenceHelper.TableFormatWide;
         }
 
         private static string? Prompt(Editor ed, string message)
