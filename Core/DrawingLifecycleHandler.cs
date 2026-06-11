@@ -1,4 +1,5 @@
 using System;
+using System.Windows.Threading;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using IWCCadToolsV9.Helpers;
@@ -111,37 +112,50 @@ namespace IWCCadToolsV9.Core
             if (doc == null) return;
             try
             {
+                // Phase 1 — all work that touches AutoCAD objects (DB, UserData, event wiring)
+                // must happen on the main AutoCAD thread.  DocumentCreated fires on the main
+                // thread, so we are safe here.  We capture svc before any await so the
+                // background phase can read it without touching AutoCAD APIs.
                 var svc = ProjectContextService.GetOrCreate(doc);
-
                 DwgPropertyStore.EnsureAllKeysExist(doc);
                 WireBeforeSaveOnce(doc, svc);
                 WireSheetEraseMonitorOnce(doc);
                 WireSaveAsMonitorOnce(doc, svc);
 
-                // LoadAsync does SQL I/O — run on background thread, then return
-                // to the AutoCAD main thread before showing any modal dialogs.
+                // Phase 2 — SQL I/O only; ConfigureAwait(false) lets this run on a
+                // thread-pool thread so the AutoCAD UI stays responsive while we query.
                 await svc.LoadAsync().ConfigureAwait(false);
 
-                Application.DocumentManager.ExecuteInApplicationContext(
-                    state =>
-                    {
-                        AutoUpdateExistingTablesOnce((Document)state!);
-                        DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
-                    }, doc);
+                // Phase 3 — marshal back to the UI thread for all AutoCAD object access,
+                // modal dialogs, and palette notification.
+                //
+                // We use the WPF Dispatcher directly rather than ExecuteInApplicationContext
+                // because ExecuteInApplicationContext queues into AutoCAD's own message pump,
+                // which can collide with the Ribbon's Idle handler and cause a cross-thread
+                // Dispatcher exception when a second associated drawing is opened.
+                // Dispatcher.InvokeAsync schedules on the same UI thread but through WPF's
+                // queue, which does not interfere with the Ribbon PaletteSet.
+                var dispatcher = System.Windows.Application.Current?.Dispatcher;
+                if (dispatcher == null) return;
 
-                // PromptForProject / PromptForDash call ShowModalDialog which must
-                // be invoked on the main AutoCAD thread. ExecuteInApplicationContext
-                // is the documented safe way to marshal back from any thread.
-                if (!svc.HasProject || !svc.HasDash)
+                await dispatcher.InvokeAsync(() =>
                 {
-                    Application.DocumentManager.ExecuteInApplicationContext(
-                        state =>
-                        {
-                            var s = (ProjectContextService)state!;
-                            if (!s.HasProject) s.PromptForProject();
-                            else if (!s.HasDash) s.PromptForDash();
-                        }, svc);
-                }
+                    // Refresh any existing IWC tables that were inserted in this drawing.
+                    AutoUpdateExistingTablesOnce(svc.Document);
+
+                    // Sync drawing-series sheet data from the database.
+                    DrawingSeriesService.SyncActiveDocumentSheetsFromDatabase();
+
+                    // Notify the palette so it rebinds to the loaded project.
+                    // RaiseProjectLoaded is itself Dispatcher-safe, but we are already
+                    // on the UI thread here so it fires synchronously.
+                    if (svc.HasProject)
+                        svc.RaiseProjectLoaded();
+
+                    // If the drawing has no project or dash association yet, prompt now.
+                    if (!svc.HasProject) svc.PromptForProject();
+                    else if (!svc.HasDash) svc.PromptForDash();
+                }, DispatcherPriority.Normal);
             }
             catch (System.Exception ex)
             {

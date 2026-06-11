@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Windows.Threading;
 using Autodesk.AutoCAD.ApplicationServices;
 using IWCCadToolsV9.Data;
 using IWCCadToolsV9.Data.Models;
@@ -43,6 +44,9 @@ namespace IWCCadToolsV9.Core
         // -----------------------------------------------------------------------
 
         private readonly Document _doc;
+
+        /// <summary>The AutoCAD document this context is bound to.</summary>
+        public Document Document => _doc;
 
         public ProjectRecord?              Project   { get; private set; }
         public DashRecord?                 Dash      { get; private set; }
@@ -160,7 +164,7 @@ namespace IWCCadToolsV9.Core
             }
 
             if (HasProject)
-                ProjectLoaded?.Invoke(this, EventArgs.Empty);
+                RaiseProjectLoaded();
         }
 
         // -----------------------------------------------------------------------
@@ -246,7 +250,7 @@ namespace IWCCadToolsV9.Core
             DwgPropertyStore.WriteDashId(_doc, dashId);
 
             Dash = _repo.GetDashById(dashId);
-            ProjectLoaded?.Invoke(this, EventArgs.Empty);
+            RaiseProjectLoaded();
         }
 
 
@@ -320,9 +324,26 @@ namespace IWCCadToolsV9.Core
 /// Re-raises ProjectLoaded for the current document context.
 /// Called by DrawingLifecycleHandler on DocumentActivated so subscribed
 /// UI controls (CtlIWCProj, ctlIWCProjNav) rebind without a DB query.
+/// Always marshals to the WPF UI Dispatcher so subscribers never need
+/// to check InvokeRequired or Dispatcher.CheckAccess themselves.
 /// </summary>
 internal void RaiseProjectLoaded()
-    => ProjectLoaded?.Invoke(this, EventArgs.Empty);
+{
+    var dispatcher = System.Windows.Application.Current?.Dispatcher;
+    if (dispatcher != null && !dispatcher.CheckAccess())
+    {
+        // We are on a background thread — post to the UI dispatcher and return
+        // immediately so we don't block the caller.
+        dispatcher.BeginInvoke(
+            DispatcherPriority.Normal,
+            new Action(() => ProjectLoaded?.Invoke(this, EventArgs.Empty)));
+    }
+    else
+    {
+        // Already on the UI thread (or no WPF Application — e.g. unit tests).
+        ProjectLoaded?.Invoke(this, EventArgs.Empty);
+    }
+}
 
     
         // -----------------------------------------------------------------------

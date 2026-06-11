@@ -251,8 +251,21 @@ namespace IWCCadToolsV9.UI
 
         private void InitializeComponent()
         {
-            txtSearch   = new TextBox    { PlaceholderText = "Search projects…", Dock = DockStyle.Top };
-            lstProjects = new ListBox    { Dock = DockStyle.Fill, IntegralHeight = false };
+            txtSearch   = new TextBox
+            {
+                PlaceholderText = "Search projects…",
+                Dock            = DockStyle.Top,
+                Font            = new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Point),
+                Height          = 32,
+                Padding         = new Padding(4, 6, 4, 6)
+            };
+            lstProjects = new ListBox
+            {
+                Dock            = DockStyle.Fill,
+                IntegralHeight  = false,
+                Font            = new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Point),
+                ItemHeight      = 22
+            };
             dgvDashes   = new DataGridView
             {
                 Dock = DockStyle.Fill, ReadOnly = true,

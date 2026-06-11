@@ -57,8 +57,19 @@ namespace IWCCadToolsV9.UI
         {
             if (IsDisposed) return;
 
+            // Debounce: if multiple DataChanged events arrive in rapid succession
+            // (e.g. the two RaiseDrawingSeriesDataChanged calls inside
+            // ReviewProjectDashChange), collapse them into a single UI refresh.
+            // BeginInvoke already queues on the UI thread; the flag ensures only
+            // one queued refresh is ever pending at a time.
+            if (_seriesChangeDebounced) return;
+            _seriesChangeDebounced = true;
+
             void RefreshDrawingSeriesView()
-                => LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            {
+                _seriesChangeDebounced = false;
+                LoadDrawingSeries(_currentSvc?.Project?.Id ?? 0, _currentSvc?.Dash?.DashId ?? 0);
+            }
 
             if (InvokeRequired)
                 BeginInvoke((MethodInvoker)RefreshDrawingSeriesView);
@@ -81,6 +92,23 @@ namespace IWCCadToolsV9.UI
         private bool _filePropsDirty;
         private bool _loadingBomMetal;
 
+        // Guards against concurrent or back-to-back LoadDrawingSeries calls that
+        // would append duplicate rows.  _seriesLoadToken is incremented each time
+        // a new load starts; the async continuation checks its captured token and
+        // discards results if a newer load has since been initiated.
+        private int  _seriesLoadToken;
+        private bool _seriesChangeDebounced;
+
+        // Tracks which document path was most recently bound by OnDocumentActivated
+        // *with already-loaded data*.  If OnProjectLoaded fires for that same path
+        // immediately after, the data was already present at activation time so the
+        // bind is redundant — suppress it to avoid a duplicate series load.
+        //
+        // When a file is newly opened, svc.HasProject is false at activation time
+        // (SQL load is still in progress), so the guard is NOT set and ProjectLoaded
+        // is allowed through to perform the real bind once the data is ready.
+        private string _lastActivatedDocPath = string.Empty;
+
         private void SubscribeToContext(ProjectContextService svc)
         {
             // Unsubscribe from previous document's service
@@ -94,16 +122,36 @@ namespace IWCCadToolsV9.UI
         private void OnDocumentActivated(object? sender,
             Autodesk.AutoCAD.ApplicationServices.DocumentCollectionEventArgs e)
         {
-            // Run on the UI thread — DocumentActivated is already main-thread safe
             if (e.Document == null) return;
             var svc = ProjectContextService.GetOrCreate(e.Document);
+
+            // Only set the guard when data is already in memory.  If the service has
+            // no project yet the SQL load is still running; ProjectLoaded must fire
+            // to populate the palette once data arrives.
+            _lastActivatedDocPath = svc.HasProject
+                ? (e.Document.Name ?? string.Empty)
+                : string.Empty;
+
             SubscribeToContext(svc);
             BindToService(svc);
         }
 
         private void OnProjectLoaded(object? sender, EventArgs e)
         {
-            // ProjectLoaded may fire from a background Task — marshal to UI thread
+            // Suppress only when OnDocumentActivated already bound this same document
+            // with complete data (guard path is set and matches current document).
+            string currentPath = _currentSvc?.Document?.Name ?? string.Empty;
+            if (!string.IsNullOrEmpty(_lastActivatedDocPath) &&
+                string.Equals(currentPath, _lastActivatedDocPath, StringComparison.OrdinalIgnoreCase))
+            {
+                // Data was already present at activation — this ProjectLoaded is redundant.
+                // Clear the guard so the next genuine event (dash change, etc.) is not suppressed.
+                _lastActivatedDocPath = string.Empty;
+                return;
+            }
+
+            // Fresh file open (data just finished loading) or post-activation event
+            // (dash changed, project reassigned) — proceed with binding.
             if (InvokeRequired)
                 Invoke(new Action(() => BindToService(_currentSvc)));
             else
@@ -336,7 +384,8 @@ namespace IWCCadToolsV9.UI
             }
             if (btnBomAddMaterial != null) btnBomAddMaterial.Enabled = hasContext;
             if (btnBomAddHardware != null) btnBomAddHardware.Enabled = hasContext;
-            if (btnBomExportPdf != null) btnBomExportPdf.Enabled = hasContext;
+            if (btnBomExportPdf  != null) btnBomExportPdf.Enabled  = hasContext;
+            if (btnBomExportCsv  != null) btnBomExportCsv.Enabled  = hasContext;
 
             if (!hasContext) return;
 
@@ -488,6 +537,9 @@ namespace IWCCadToolsV9.UI
         private void btnBomExportPdf_Click(object? sender, EventArgs e)
             => ExportCurrentBomPdf();
 
+        private void btnBomExportCsv_Click(object? sender, EventArgs e)
+            => ExportCurrentBomCsv();
+
         private void btnBomInsertHdwTable_Click(object? sender, EventArgs e)
             => RunAcadCommandFromPalette("IWCInsertHardwareTable");
 
@@ -514,6 +566,12 @@ namespace IWCCadToolsV9.UI
             if (lblDrawingSeriesContext == null || dgvDrawingSeriesFiles == null || tvDrawingSeriesSheets == null)
                 return;
 
+            // Increment the token before clearing the UI.  Any in-flight load that
+            // was started before this call captured an older token value and will
+            // discard its results when it resumes after the await, preventing it
+            // from appending a second set of rows into the now-reloading controls.
+            int myToken = ++_seriesLoadToken;
+
             dgvDrawingSeriesFiles.Rows.Clear();
             tvDrawingSeriesSheets.Nodes.Clear();
 
@@ -534,6 +592,10 @@ namespace IWCCadToolsV9.UI
             {
                 var repo = new DrawingSeriesRepository();
                 var nodes = await repo.GetDashSheetTreeAsync(projectId, dashId);
+
+                // A newer load was started while we were awaiting the DB query.
+                // Our results are stale — discard them to avoid appending duplicates.
+                if (myToken != _seriesLoadToken) return;
 
                 foreach (var dashNodeData in nodes)
                 {
@@ -568,8 +630,10 @@ namespace IWCCadToolsV9.UI
             }
             catch (System.Exception ex)
             {
-                MessageBox.Show($"Unable to load Drawing Series data.\n\n{ex.Message}",
-                    "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Only show the error if we are still the active load.
+                if (myToken == _seriesLoadToken)
+                    MessageBox.Show($"Unable to load Drawing Series data.\n\n{ex.Message}",
+                        "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -1383,6 +1447,106 @@ namespace IWCCadToolsV9.UI
                 fileName = fileName.Replace(c, '_');
             return fileName;
         }
+
+        // -----------------------------------------------------------------------
+        // CSV export — mirrors ExportCurrentBomPdf but writes a flat CSV file.
+        // Each BOM section is separated by a blank line with a section-header row
+        // so the output remains easy to read and process in Excel.
+        // -----------------------------------------------------------------------
+
+        private void ExportCurrentBomCsv()
+        {
+            if (_currentSvc?.Project == null || _currentSvc?.Dash == null)
+            {
+                MessageBox.Show("No active project/dash context is loaded for the Current BOM report.",
+                    "IWC Current BOM", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Commit any in-progress grid edits before collecting data.
+            Validate();
+            dgvBomMaterials.EndEdit();
+            dgvBomHardware.EndEdit();
+            dgvBomMetal.EndEdit();
+
+            var sections = new List<BomPdfSection>
+            {
+                CollectGridSection("Child Component Dashes", dgvBomComponents),
+                CollectGridSection("Associated Materials",   dgvBomMaterials),
+                CollectGridSection("Associated Hardware",    dgvBomHardware),
+                CollectGridSection("Metal Part List",        dgvBomMetal)
+            };
+
+            string reportTitle = lblBomContext?.Text?.Trim() ?? "Current BOM";
+            string defaultName = SanitizeFileName($"IWC_BOM_{reportTitle}_{DateTime.Now:yyyyMMdd_HHmm}.csv");
+
+            using var save = new SaveFileDialog
+            {
+                Title         = "Export Current BOM to CSV",
+                Filter        = "CSV files (*.csv)|*.csv",
+                FileName      = defaultName,
+                AddExtension  = true,
+                DefaultExt    = "csv",
+                OverwritePrompt = true
+            };
+
+            if (save.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            try
+            {
+                WriteBomCsv(reportTitle, sections, save.FileName);
+                MessageBox.Show("Current BOM CSV export complete.",
+                    "IWC Current BOM", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to export Current BOM CSV.\n\n{ex.Message}",
+                    "IWC Current BOM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// Writes all BOM sections to a single CSV file.
+        /// Layout: report-title row, then for each section — a blank line,
+        /// a section-header row, a column-header row, and one row per data row.
+        /// All values are RFC-4180 quoted so commas and line-breaks inside
+        /// cell text don't corrupt the file.
+        /// </summary>
+        private static void WriteBomCsv(string reportTitle, List<BomPdfSection> sections, string path)
+        {
+            using var writer = new System.IO.StreamWriter(path, append: false, encoding: System.Text.Encoding.UTF8);
+
+            // Report title line
+            writer.WriteLine(CsvQuote(reportTitle));
+
+            foreach (var section in sections)
+            {
+                // Blank separator line + section header
+                writer.WriteLine();
+                writer.WriteLine(CsvQuote(section.Title));
+
+                if (section.Columns.Count == 0 || section.Rows.Count == 0)
+                {
+                    writer.WriteLine(CsvQuote("(no data)"));
+                    continue;
+                }
+
+                // Column header row
+                writer.WriteLine(string.Join(",", section.Columns.Select(c => CsvQuote(c.Header))));
+
+                // Data rows
+                foreach (var row in section.Rows)
+                    writer.WriteLine(string.Join(",", row.Select(CsvQuote)));
+            }
+        }
+
+        /// <summary>
+        /// Wraps a single cell value in double-quotes and escapes any embedded
+        /// double-quotes by doubling them (RFC 4180 §2.7).
+        /// </summary>
+        private static string CsvQuote(string value)
+            => "\"" + (value ?? string.Empty).Replace("\"", "\"\"") + "\"";
 
         private static void PrintBomReportToPdf(string reportTitle, List<BomPdfSection> sections, string pdfPath)
         {
@@ -2804,6 +2968,7 @@ namespace IWCCadToolsV9.UI
             };
             btnBomRefresh = new Button { Text = "Refresh", Width = 90, Height = 28 };
             btnBomExportPdf = new Button { Text = "Export PDF", Width = 100, Height = 28 };
+            btnBomExportCsv = new Button { Text = "Export CSV", Width = 100, Height = 28 };
             btnBomAddMaterial = new Button { Text = "Add Material", Width = 105, Height = 28 };
             btnBomAddHardware = new Button { Text = "Add Hardware", Width = 110, Height = 28 };
             btnBomInsertHdwTable = new Button { Text = "Insert Hdw Table", Width = 125, Height = 28 };
@@ -2812,6 +2977,7 @@ namespace IWCCadToolsV9.UI
             btnBomInsertCompList = new Button { Text = "Insert Comp List", Width = 130, Height = 28 };
             btnBomRefresh.Click += btnBomRefresh_Click;
             btnBomExportPdf.Click += btnBomExportPdf_Click;
+            btnBomExportCsv.Click += btnBomExportCsv_Click;
             btnBomAddMaterial.Click += btnBomAddMaterial_Click;
             btnBomAddHardware.Click += btnBomAddHardware_Click;
             btnBomInsertHdwTable.Click += btnBomInsertHdwTable_Click;
@@ -2822,6 +2988,7 @@ namespace IWCCadToolsV9.UI
             {
                 btnBomRefresh,
                 btnBomExportPdf,
+                btnBomExportCsv,
                 btnBomInsertMetalTable,
                 btnBomInsertCompList,
                 btnBomInsertMatTable,
@@ -3456,6 +3623,7 @@ namespace IWCCadToolsV9.UI
         private DataGridView    dgvBomMetal        = null!;
         private Button          btnBomRefresh      = null!;
         private Button          btnBomExportPdf    = null!;
+        private Button          btnBomExportCsv    = null!;
         private Button          btnBomAddMaterial  = null!;
         private Button          btnBomAddHardware  = null!;
         private Button          btnBomInsertHdwTable = null!;
