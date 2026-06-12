@@ -523,8 +523,9 @@ namespace IWCCadToolsV9.UI
         {
             try
             {
-                // Updates only tables that already exist in the current drawing and have
-                // a stored IWC table reference: hardware, materials, and metal parts.
+                // Updates tagged IWC tables that already exist in the current drawing:
+                // hardware, materials, and metal parts. Multiple copies and tables
+                // inside block definitions are supported.
                 TableCommands.AutoUpdateExistingTablesInActiveDocument(quiet: false);
             }
             catch (Exception ex)

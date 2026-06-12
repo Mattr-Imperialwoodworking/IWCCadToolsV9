@@ -205,10 +205,9 @@ namespace IWCCadToolsV9.Core
         }
 
         // -----------------------------------------------------------------------
-        // Automatic table refresh — only refreshes drawings that already contain
-        // stored IWC material/hardware table references. This keeps existing
-        // IWCUpdateMaterialTable / IWCUpdateHardwareTable command behavior intact
-        // while allowing opened drawings to update automatically.
+        // Automatic table refresh — refreshes tagged IWC material/hardware/metal
+        // tables that already exist in the drawing. Tagged table scanning supports
+        // multiple inserted copies and tables inside block definitions.
         // -----------------------------------------------------------------------
 
         private const string AutoTablesUpdatedKey = "IWC_AutoTablesUpdatedOnOpen_v1";

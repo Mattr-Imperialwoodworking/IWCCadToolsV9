@@ -52,7 +52,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 5,
+          "SelectedChildIndex": 6,
           "Children": [
             {
               "$type": "Bookmark",
@@ -75,6 +75,10 @@
               "Name": "ST:131:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
             },
             {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "CommandLineService.cs",
@@ -82,7 +86,7 @@
               "RelativeDocumentMoniker": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
               "ToolTip": "C:\\Users\\mattr\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
               "RelativeToolTip": "..\\..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e602f26157a97555b7703dea75eb1c7e95f7cf3b771329b0a36ca01e3b85bd23\\CommandLineService.cs",
-              "ViewState": "AgIAALwCAAAAAAAAAAAswMoCAAAcAAAAAQAAAA==",
+              "ViewState": "AgIAALwCAAAAAAAAAAAswM8CAAAEAAAAAQAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-06-11T17:59:56.261Z",
               "EditorCaption": ""
