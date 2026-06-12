@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.Colors;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 
@@ -266,9 +267,7 @@ namespace IWCCadToolsV9.Helpers
             table.Position = Point3d.Origin;
             ApplyColumnWidths(table, columns, scale);
 
-            table.SetRowHeight(0, 0.25 * scale);
-            SetCell(table, 0, 0, columns[0].Header, 5.0 / 64.0 * scale, CellAlignment.MiddleCenter);
-            SetCell(table, 0, 1, titleText, 5.0 / 64.0 * scale, CellAlignment.MiddleLeft);
+            SetTitleblockTitleRow(table, 0, titleText, 5.0 / 64.0 * scale, scale);
 
             var groupHeaderRows = PopulateTitleblockRows(table, data, columns, textBuilder, groupBuilder, scale, preserveExistingRowHeights: false, existingRowCount: 0);
             table.GenerateLayout();
@@ -296,9 +295,7 @@ namespace IWCCadToolsV9.Helpers
             double scale = GetDimScale();
             ApplyColumnWidths(acadTable, columns, scale);
 
-            acadTable.SetRowHeight(0, 0.25 * scale);
-            SetCell(acadTable, 0, 0, columns[0].Header, 5.0 / 64.0 * scale, CellAlignment.MiddleCenter);
-            SetCell(acadTable, 0, 1, titleText, 5.0 / 64.0 * scale, CellAlignment.MiddleLeft);
+            SetTitleblockTitleRow(acadTable, 0, titleText, 5.0 / 64.0 * scale, scale);
 
             var groupHeaderRows = PopulateTitleblockRows(acadTable, data, columns, textBuilder, groupBuilder, scale, preserveExistingRowHeights: true, existingRowCount: existingRowCount);
             acadTable.GenerateLayout();
@@ -357,16 +354,14 @@ namespace IWCCadToolsV9.Helpers
         {
             if (groupHeaderRows == null || groupHeaderRows.Count == 0) return;
 
-            // GenerateLayout() can reset cell styles back to the row default ("Data").
-            // Re-stamp every group header row with "Header" after layout is complete.
-            // This is the authoritative final pass — nothing runs after this.
+            // GenerateLayout() can reset row/cell formatting after content is written.
+            // Re-stamp every group header row's manual formatting after layout is
+            // complete. This is the authoritative final pass — nothing runs after this.
             foreach (int row in groupHeaderRows)
             {
                 if (row < 0 || row >= table.Rows.Count) continue;
 
-                table.SetRowHeight(row, 0.25 * scale);
-                ApplyHeaderCellStyleDirect(table, row, 0);
-                ApplyHeaderCellStyleDirect(table, row, 1);
+                ApplyGroupHeaderRowFormatting(table, row, scale);
             }
         }
 
@@ -392,332 +387,70 @@ namespace IWCCadToolsV9.Helpers
 
         private static void SetTitleblockGroupHeaderRow(Table table, int row, string groupText, double textHeight, double scale)
         {
-            table.SetRowHeight(row, 0.25 * scale);
-
-            // Order matters in AutoCAD 2025:
-            //   1. Merge cells first (MergeCells resets cell style to row default).
-            //   2. Write content via SetCell (also resets inherited cell style).
-            //   3. Apply Header style LAST so nothing can overwrite it.
-            // The "Row style" value shown in the Properties palette maps to the
-            // cell-level Style string on each cell in the row — there is no
-            // separate writable row-type property in the 2025 managed API.
+            // Merge first — MergeCells can reset row/cell formatting, so all
+            // explicit formatting is (re)applied afterward via
+            // ApplyGroupHeaderRowFormatting, including by the post-layout pass
+            // in ReapplyTitleblockGroupHeaderStyles.
             try { table.MergeCells(CellRange.Create(table, row, 0, row, 1)); } catch { }
+
             SetCell(table, row, 0, groupText, textHeight, CellAlignment.MiddleCenter);
 
-            // Apply after content is written so AutoCAD cannot reset it.
-            ApplyHeaderCellStyleDirect(table, row, 0);
-            ApplyHeaderCellStyleDirect(table, row, 1);
+            ApplyGroupHeaderRowFormatting(table, row, scale);
         }
 
-        private static void ApplyHeaderCellStyleDirect(Table table, int row, int col)
+        /// <summary>
+        /// Applies the manual formatting spec for a group header (separator) row:
+        /// background fill color 254, .06 horizontal/vertical cell margins,
+        /// .07 text height, and .1875 cell (row) height. Applied to both cells
+        /// in the merged row.
+        /// </summary>
+        private static void ApplyGroupHeaderRowFormatting(Table table, int row, double scale)
         {
-            // TableCell is a VALUE TYPE (struct) in the AutoCAD managed API.
-            // Assigning to table.Cells[row, col].Style modifies a temporary copy —
-            // the change is never written back to the table's database object.
-            //
-            // The correct path is Table.SetCellStyle(int row, int col, string styleName)
-            // which is an instance method on Table that writes directly through to the
-            // underlying AcDbTable record.
-            //
-            // We try "GroupHeader" first (defined in IWC_Material table style) then
-            // "Header" as a fallback for drawings using the standard AutoCAD table style.
-            foreach (string styleName in new[] { "GroupHeader", "Header" })
+            const short backgroundColorIndex = 254;
+            const double cellMargin = 0.06;
+            const double textHeight = 0.07;
+            const double cellHeight = 0.1875;
+
+            table.Rows[row].Height = cellHeight * scale;
+
+            var bgColor = Autodesk.AutoCAD.Colors.Color.FromColorIndex(ColorMethod.ByAci, backgroundColorIndex);
+
+            for (int col = 0; col < table.Columns.Count; col++)
             {
-                // Path 1: Direct method call — Table.SetCellStyle(row, col, styleName).
-                // This is the correct API for AutoCAD 2025 managed wrapper.
-                try
-                {
-                    table.SetCellStyle(row, col, styleName);
-                    return;
-                }
-                catch { }
+                table.SetBackgroundColorNone(row, col, false);
+                table.SetBackgroundColor(row, col, bgColor);
+                table.SetMargin(row, col, CellMargins.Left, cellMargin * scale);
+                table.SetMargin(row, col, CellMargins.Right, cellMargin * scale);
+                table.SetMargin(row, col, CellMargins.Top, cellMargin * scale);
+                table.SetMargin(row, col, CellMargins.Bottom, cellMargin * scale);
 
-                // Path 2: Reflection scan for SetCellStyle overloads.
-                // Handles cases where the overload resolution differs by AutoCAD version.
-                try
-                {
-                    var methods = table.GetType().GetMethods(
-                        System.Reflection.BindingFlags.Instance |
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic);
-
-                    foreach (var method in methods)
-                    {
-                        if (!string.Equals(method.Name, "SetCellStyle", StringComparison.Ordinal))
-                            continue;
-                        var p = method.GetParameters();
-                        if (p.Length == 3
-                            && p[0].ParameterType == typeof(int)
-                            && p[1].ParameterType == typeof(int)
-                            && p[2].ParameterType == typeof(string))
-                        {
-                            method.Invoke(table, new object[] { row, col, styleName });
-                            return;
-                        }
-                    }
-                }
-                catch { }
-
-                // Path 3: Reflection fallback for CellRange-based SetCellStyle overloads
-                // that differ in signature from the (int, int, string) form.
-                try
-                {
-                    var range = CellRange.Create(table, row, col, row, col);
-                    var methods = table.GetType().GetMethods(
-                        System.Reflection.BindingFlags.Instance |
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic);
-                    foreach (var method in methods)
-                    {
-                        if (!string.Equals(method.Name, "SetCellStyle", StringComparison.Ordinal))
-                            continue;
-                        var p = method.GetParameters();
-                        if (p.Length == 2
-                            && p[0].ParameterType == typeof(CellRange)
-                            && p[1].ParameterType == typeof(string))
-                        {
-                            method.Invoke(table, new object[] { range, styleName });
-                            return;
-                        }
-                    }
-                }
-                catch { }
+                var cell = table.Cells[row, col];
+                cell.TextHeight = textHeight * scale;
             }
         }
 
-        private static void ApplyHeaderRowStyle(Table table, int row)
+        /// <summary>
+        /// Sets up the top title row of a titleblock table (e.g. "IWC HARDWARE:" /
+        /// "IWC MATERIALS:"): merges both columns into a single cell, writes the
+        /// title text, and sets the background fill to color 253.
+        /// </summary>
+        private static void SetTitleblockTitleRow(Table table, int row, string titleText, double textHeight, double scale)
         {
-            // Preferred path when the AutoCAD API exposes a row type setter.
-            TryInvokeTableSetRowType(table, row, "HeaderRow");
-            TryInvokeTableSetRowType(table, row, "Header");
+            const short backgroundColorIndex = 253;
 
-            // Some AutoCAD versions expose row type as a property on the row object.
-            // Set both string-style and enum-style properties because the wrapper
-            // differs by release and by table state.
-            TrySetRowTypeProperty(table, row, "HeaderRow");
-            TrySetRowTypeProperty(table, row, "Header");
+            table.Rows[row].Height = 0.25 * scale;
 
-            // Fallback paths for AutoCAD versions that expose row style through
-            // the Rows collection rather than through SetRowType.  These are
-            // intentionally reflection/dynamic based so the add-in stays buildable
-            // across the AutoCAD 2025 .NET API surface.
-            TrySetRowStyleProperty(table, row, "Header");
-            TrySetRowStyleProperty(table, row, "HeaderRow");
+            try { table.MergeCells(CellRange.Create(table, row, 0, row, 1)); } catch { }
 
-            // AutoCAD's default row 1 is a real Header row.  When available, copy
-            // its row-type/style values onto later group rows after they have been
-            // created; this fixes the case where only the first group header was
-            // reporting as Header and later group rows stayed Data.
-            TryCopyHeaderRowStyle(table, row);
-        }
+            SetCell(table, row, 0, titleText, textHeight, CellAlignment.MiddleCenter);
 
-        private static void ApplyHeaderCellStyle(Table table, int row, int col)
-        {
-            ApplyHeaderCellStyleDirect(table, row, col);
-        }
+            var bgColor = Autodesk.AutoCAD.Colors.Color.FromColorIndex(ColorMethod.ByAci, backgroundColorIndex);
 
-        private static void TryInvokeTableSetCellStyle(Table table, int row, int col, string styleName)
-        {
-            try
+            for (int col = 0; col < table.Columns.Count; col++)
             {
-                var methods = table.GetType().GetMethods(
-                    System.Reflection.BindingFlags.Instance |
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic);
-
-                foreach (var method in methods)
-                {
-                    if (!string.Equals(method.Name, "SetCellStyle", StringComparison.Ordinal))
-                        continue;
-
-                    var parameters = method.GetParameters();
-                    if (parameters.Length != 3)
-                        continue;
-
-                    if (parameters[0].ParameterType == typeof(int) &&
-                        parameters[1].ParameterType == typeof(int) &&
-                        parameters[2].ParameterType == typeof(string))
-                    {
-                        method.Invoke(table, new object[] { row, col, styleName });
-                        return;
-                    }
-                }
+                table.SetBackgroundColorNone(row, col, false);
+                table.SetBackgroundColor(row, col, bgColor);
             }
-            catch { }
-        }
-
-        private static void TryInvokeTableSetRowType(Table table, int row, string enumName)
-        {
-            try
-            {
-                var methods = table.GetType().GetMethods(
-                    System.Reflection.BindingFlags.Instance |
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic);
-
-                foreach (var method in methods)
-                {
-                    if (!string.Equals(method.Name, "SetRowType", StringComparison.Ordinal))
-                        continue;
-
-                    var parameters = method.GetParameters();
-                    if (parameters.Length < 2 || parameters.Length > 3)
-                        continue;
-
-                    Type enumType = parameters[^1].ParameterType;
-                    if (!enumType.IsEnum)
-                        continue;
-
-                    object headerValue;
-                    try
-                    {
-                        headerValue = Enum.Parse(enumType, enumName, ignoreCase: true);
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-
-                    if (parameters.Length == 2 && parameters[0].ParameterType == typeof(int))
-                    {
-                        method.Invoke(table, new object[] { row, headerValue });
-                        return;
-                    }
-
-                    if (parameters.Length == 3 &&
-                        parameters[0].ParameterType == typeof(int) &&
-                        parameters[1].ParameterType == typeof(int))
-                    {
-                        method.Invoke(table, new object[] { row, row, headerValue });
-                        return;
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private static void TrySetRowTypeProperty(Table table, int row, string enumName)
-        {
-            TrySetRowEnumProperty(table, row, "RowType", enumName);
-            TrySetRowEnumProperty(table, row, "Type", enumName);
-        }
-
-        private static void TrySetRowEnumProperty(Table table, int row, string propertyName, string enumName)
-        {
-            try
-            {
-                object tableRow = table.Rows[row];
-                var prop = tableRow.GetType().GetProperty(propertyName,
-                    System.Reflection.BindingFlags.Instance |
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic);
-
-                if (prop == null || !prop.CanWrite || !prop.PropertyType.IsEnum) return;
-
-                object value;
-                try
-                {
-                    value = Enum.Parse(prop.PropertyType, enumName, ignoreCase: true);
-                }
-                catch
-                {
-                    return;
-                }
-
-                prop.SetValue(tableRow, value);
-            }
-            catch { }
-        }
-
-        private static void TryCopyHeaderRowStyle(Table table, int row)
-        {
-            if (row == 1 || table.Rows.Count <= 1) return;
-
-            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "RowType");
-            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "Type");
-            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "Style");
-            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "CellStyle");
-            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "StyleName");
-            TryCopyRowProperty(table, sourceRow: 1, targetRow: row, "RowStyle");
-        }
-
-        private static void TryCopyRowProperty(Table table, int sourceRow, int targetRow, string propertyName)
-        {
-            try
-            {
-                object src = table.Rows[sourceRow];
-                object dst = table.Rows[targetRow];
-                var srcProp = src.GetType().GetProperty(propertyName,
-                    System.Reflection.BindingFlags.Instance |
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic);
-                var dstProp = dst.GetType().GetProperty(propertyName,
-                    System.Reflection.BindingFlags.Instance |
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic);
-
-                if (srcProp == null || dstProp == null || !dstProp.CanWrite) return;
-                object? value = srcProp.GetValue(src);
-                if (value == null) return;
-                if (!dstProp.PropertyType.IsAssignableFrom(srcProp.PropertyType)) return;
-                dstProp.SetValue(dst, value);
-            }
-            catch { }
-        }
-
-        private static void TrySetRowStyleProperty(Table table, int row, string styleName)
-        {
-            try
-            {
-                dynamic tableRow = table.Rows[row];
-                tableRow.Style = styleName;
-            }
-            catch { }
-
-            try
-            {
-                dynamic tableRow = table.Rows[row];
-                tableRow.CellStyle = styleName;
-            }
-            catch { }
-
-            try
-            {
-                dynamic tableRow = table.Rows[row];
-                tableRow.StyleName = styleName;
-            }
-            catch { }
-
-            try
-            {
-                dynamic tableRow = table.Rows[row];
-                tableRow.RowStyle = styleName;
-            }
-            catch { }
-        }
-
-        private static void TrySetCellStyleProperty(Table table, int row, int col, string styleName)
-        {
-            try
-            {
-                dynamic cell = table.Cells[row, col];
-                cell.Style = styleName;
-            }
-            catch { }
-
-            try
-            {
-                dynamic cell = table.Cells[row, col];
-                cell.CellStyle = styleName;
-            }
-            catch { }
-
-            try
-            {
-                dynamic cell = table.Cells[row, col];
-                cell.StyleName = styleName;
-            }
-            catch { }
         }
 
         private static string NormalizeGroupText(string groupText)
