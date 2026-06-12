@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
@@ -108,7 +109,11 @@ namespace IWCCadToolsV9.Core
             }
 
             var repo = new DrawingSeriesRepository();
-            int? fileId = DrawingSeriesAcadHelper.ReadFileIdFromDwg();
+            int? fileIdFromDwg = DrawingSeriesAcadHelper.ReadFileIdFromDwg();
+            if (fileIdFromDwg.HasValue && fileIdFromDwg.Value > 0)
+                ReviewActiveDocumentFileNameChange(doc, repo, fileIdFromDwg.Value, svc?.Project?.Id);
+
+            int? fileId = fileIdFromDwg;
             if (!fileId.HasValue)
                 fileId = repo.GetFileIdByFullPathAsync(doc.Name).GetAwaiter().GetResult();
 
@@ -145,6 +150,42 @@ namespace IWCCadToolsV9.Core
                     "IWC Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
 
+            return true;
+        }
+
+
+        private static bool ReviewActiveDocumentFileNameChange(Document doc, DrawingSeriesRepository repo, int fileId, int? projectId)
+        {
+            if (doc == null || fileId <= 0 || !DrawingSeriesAcadHelper.ActiveDocumentHasUsablePath())
+                return false;
+
+            string currentFullPath = doc.Name ?? string.Empty;
+            string currentFileName = Path.GetFileName(currentFullPath);
+            if (string.IsNullOrWhiteSpace(currentFileName))
+                return false;
+
+            var dbFile = repo.GetFileByIdAsync(fileId).GetAwaiter().GetResult();
+            if (dbFile == null || dbFile.FileId != fileId)
+                return false;
+
+            if (string.Equals(dbFile.FileName, currentFileName, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var result = MessageBox.Show(
+                "The open drawing is already linked to a Drawing Series database file record, but the file name has changed." +
+                Environment.NewLine + Environment.NewLine +
+                $"Database file name: {dbFile.FileName}" + Environment.NewLine +
+                $"Open drawing file:   {currentFileName}" + Environment.NewLine + Environment.NewLine +
+                "Update the Drawing Series database file name/path to match the open drawing?",
+                "IWC Drawing Series", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes)
+                return false;
+
+            repo.UpdateFilePathAsync(fileId, projectId, currentFullPath).GetAwaiter().GetResult();
+            DrawingSeriesAcadHelper.WriteFileIdToDwg(fileId);
+            RaiseDrawingSeriesDataChanged();
+            doc.Editor.WriteMessage("\nIWC: Drawing Series database file name/path updated to match the open drawing.\n");
             return true;
         }
 

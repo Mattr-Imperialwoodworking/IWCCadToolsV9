@@ -366,6 +366,31 @@ namespace IWCCadToolsV9.Data
             return value == null || value == DBNull.Value ? null : Convert.ToInt32(value);
         }
 
+        public async Task<DrawingSeriesFileRecord?> GetFileByIdAsync(int fileId)
+        {
+            if (fileId <= 0) return null;
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync().ConfigureAwait(false);
+            using var cmd = new SqlCommand(@"
+                SELECT TOP (1) ID, FileName, SavedPath, FullPath, FileModifiedUtc
+                FROM dbo.Dwg_File
+                WHERE ID = @FileID;", conn);
+            cmd.Parameters.AddWithValue("@FileID", fileId);
+            using var rdr = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+            if (!await rdr.ReadAsync().ConfigureAwait(false))
+                return null;
+
+            return new DrawingSeriesFileRecord
+            {
+                FileId = SafeInt(rdr, "ID"),
+                FileName = SafeString(rdr, "FileName"),
+                SavedPath = SafeString(rdr, "SavedPath"),
+                FullPath = SafeString(rdr, "FullPath"),
+                LastWriteTimeUtc = SafeNullableDateTime(rdr, "FileModifiedUtc")
+            };
+        }
+
         public async Task<IReadOnlyList<DrawingSeriesSheetRecord>> GetSheetsForFileIdAsync(int fileId)
         {
             using var conn = IWCConn.GetSqlConnection();
