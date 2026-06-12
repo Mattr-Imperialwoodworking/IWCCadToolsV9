@@ -126,7 +126,7 @@ namespace IWCCadToolsV9.Data
                 BEGIN
                     INSERT INTO dbo.Dwg_File
                     (
-                        ProjID, SavedPath, FileName, FullPath,
+                        ProjID, DashID, SavedPath, FileName, FullPath,
                         SummaryTitle, SummarySubject, SummaryAuthor, SummaryKeywords,
                         SummaryComments, SummaryHyperlinkBase, SummaryRevision,
                         CustomPropertiesJson, FileCreatedUtc, FileModifiedUtc, FileSizeBytes,
@@ -134,7 +134,7 @@ namespace IWCCadToolsV9.Data
                     )
                     VALUES
                     (
-                        @ProjID, @SavedPath, @FileName, @FullPath,
+                        @ProjID, @DashID, @SavedPath, @FileName, @FullPath,
                         @SummaryTitle, @SummarySubject, @SummaryAuthor, @SummaryKeywords,
                         @SummaryComments, @SummaryHyperlinkBase, @SummaryRevision,
                         @CustomPropertiesJson, @FileCreatedUtc, @FileModifiedUtc, @FileSizeBytes,
@@ -146,6 +146,11 @@ namespace IWCCadToolsV9.Data
                 BEGIN
                     UPDATE dbo.Dwg_File
                     SET ProjID = @ProjID,
+                        -- Only set DashID if it isn't already populated, so re-syncing
+                        -- (e.g. Refresh Sheet Data) doesn't silently move a file's
+                        -- added-under dash. Use Add Current File to Dash to
+                        -- intentionally re-home a file to a different dash.
+                        DashID = COALESCE(DashID, @DashID),
                         SavedPath = @SavedPath,
                         FileName = @FileName,
                         FullPath = @FullPath,
@@ -736,6 +741,102 @@ namespace IWCCadToolsV9.Data
                 await tx.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
+        }
+
+
+        /// <summary>
+        /// Returns the dashes (Drawing Series / component dashes) for this project that
+        /// have at least one Dwg_File logged under them (Dwg_File.DashID), along with
+        /// each file's logged sheets. This is the direct Dwg_File -> Proj_Dash -> Proj
+        /// path used to populate the "Drawing Series List" navigation node, avoiding
+        /// the indirect Dwg_DashFile_Assoc DISTINCT/ORDER BY query.
+        /// </summary>
+        public async Task<IReadOnlyList<DrawingSeriesDashNode>> GetDrawingSeriesByProjectAsync(int projectId)
+        {
+            var dashes = new List<DrawingSeriesDashNode>();
+
+            using var conn = IWCConn.GetSqlConnection();
+            await conn.OpenAsync().ConfigureAwait(false);
+
+            using (var cmd = new SqlCommand(@"
+                SELECT d.ID, d.Dash_Num, d.Dash_Desc, d.Dash_Parent, d.Dash_Type
+                FROM dbo.Proj_Dash d
+                INNER JOIN dbo.Proj p ON p.ID = d.Proj_ID
+                WHERE d.Proj_ID = @projectId
+                  AND (d.Act_Void = 0 OR d.Act_Void IS NULL)
+                  AND EXISTS
+                  (
+                      SELECT 1
+                      FROM dbo.Dwg_File f
+                      WHERE f.ProjID = p.ID
+                        AND f.DashID = d.ID
+                  )
+                ORDER BY TRY_CAST(d.Dash_Num AS int), d.Dash_Num;", conn))
+            {
+                cmd.Parameters.AddWithValue("@projectId", projectId);
+                using var rdr = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await rdr.ReadAsync().ConfigureAwait(false))
+                {
+                    dashes.Add(new DrawingSeriesDashNode
+                    {
+                        DashId = SafeInt(rdr, "ID"),
+                        DashNum = SafeString(rdr, "Dash_Num"),
+                        DashDesc = SafeString(rdr, "Dash_Desc"),
+                        DashParent = SafeNullableInt(rdr, "Dash_Parent"),
+                        DashType = SafeNullableInt(rdr, "Dash_Type"),
+                        IsCurrentDash = false
+                    });
+                }
+            }
+
+            foreach (var dash in dashes)
+            {
+                var files = await GetFilesForDashByDashIdAsync(conn, projectId, dash.DashId).ConfigureAwait(false);
+                dash.Files.AddRange(files);
+            }
+
+            return dashes;
+        }
+
+        /// <summary>
+        /// Loads Dwg_File rows directly via Dwg_File.DashID (the dash the file was
+        /// added under), with each file's logged sheets.
+        /// </summary>
+        private static async Task<List<DrawingSeriesFileRecord>> GetFilesForDashByDashIdAsync(SqlConnection conn, int projectId, int dashId)
+        {
+            var files = new List<DrawingSeriesFileRecord>();
+            using (var cmd = new SqlCommand(@"
+                SELECT f.ID, f.DashID, d.Dash_Num, d.Dash_Desc,
+                       f.FileName, f.SavedPath, f.FullPath, f.FileModifiedUtc
+                FROM dbo.Dwg_File f
+                INNER JOIN dbo.Proj_Dash d ON d.ID = f.DashID
+                WHERE f.ProjID = @projectId
+                  AND f.DashID = @dashId
+                ORDER BY f.FileName;", conn))
+            {
+                cmd.Parameters.AddWithValue("@projectId", projectId);
+                cmd.Parameters.AddWithValue("@dashId", dashId);
+                using var rdr = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await rdr.ReadAsync().ConfigureAwait(false))
+                {
+                    files.Add(new DrawingSeriesFileRecord
+                    {
+                        FileId = SafeInt(rdr, "ID"),
+                        DashId = SafeInt(rdr, "DashID"),
+                        DashNum = SafeString(rdr, "Dash_Num"),
+                        DashDesc = SafeString(rdr, "Dash_Desc"),
+                        FileName = SafeString(rdr, "FileName"),
+                        SavedPath = SafeString(rdr, "SavedPath"),
+                        FullPath = SafeString(rdr, "FullPath"),
+                        LastWriteTimeUtc = SafeNullableDateTime(rdr, "FileModifiedUtc")
+                    });
+                }
+            }
+
+            foreach (var file in files)
+                file.Sheets.AddRange(await GetSheetsForFileAsync(conn, file.FileId).ConfigureAwait(false));
+
+            return files;
         }
 
 

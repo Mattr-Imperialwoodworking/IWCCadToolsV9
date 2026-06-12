@@ -173,6 +173,16 @@ namespace IWCCadToolsV9.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
+        public static System.Drawing.Bitmap IWCTreePOIcon {
+            get {
+                object obj = ResourceManager.GetObject("IWCTreePOIcon", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
         public static System.Drawing.Bitmap IWCTreePOIcon2 {
             get {
                 object obj = ResourceManager.GetObject("IWCTreePOIcon2", resourceCulture);

@@ -27,10 +27,14 @@
   <ItemGroup>
     <None Remove="AcadNetAutoLoad.scr" />
     <None Remove="Helpers\CustomFileProps.csv" />
+    <None Remove="Resources\DetailFieldMap.json" />
     <Content Include="AcadNetAutoLoad.scr">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Helpers\CustomFileProps.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Resources\DetailFieldMap.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

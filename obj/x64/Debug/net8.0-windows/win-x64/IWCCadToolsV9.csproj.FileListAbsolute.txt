@@ -120,3 +120,4 @@ C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debu
 C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debug\net8.0-windows\win-x64\ref\IWCCadToolsV9.dll
 C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debug\net8.0-windows\win-x64\IWCCadToolsV9.UI.FrmProjectSelector.resources
 C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debug\net8.0-windows\win-x64\IWCCadToolsV9.UI.ProjSelect.resources
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\Resources\DetailFieldMap.json

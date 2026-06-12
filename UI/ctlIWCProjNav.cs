@@ -1,6 +1,7 @@
 ﻿using Autodesk.AutoCAD.GraphicsSystem;
 using IWCCadToolsV9.Core;
 using IWCCadToolsV9.Data;            // adjust if IWCConn lives under Data or Helpers
+using IWCCadToolsV9.Data.Models;
 using IWCCadToolsV9.Helpers;         // (safe to keep; remove if not used)
 using Microsoft.Data.SqlClient;
 using System;
@@ -9,6 +10,7 @@ using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
 // Disambiguate types shared between AutoCAD and .NET assemblies
 using Application = Autodesk.AutoCAD.ApplicationServices.Application;
@@ -25,6 +27,8 @@ namespace IWCCadToolsV9.UI
         public const string IconKeyDashFolder = "dashfolder";
         public const string IconKeyDashMatFolder = "dash_mat_folder";
         public const string IconKeyDashHdwFolder = "dash_hdw_folder";
+        public const string IconKeyDwgFile = "dwg_file";
+        public const string IconKeyPO = "po_icon";
 
         // Desired min sizes (can tweak here only)
         private const int DesiredMinPanel1 = 240;
@@ -54,11 +58,14 @@ namespace IWCCadToolsV9.UI
         private ToolStripMenuItem _miAssociateHdwToDash   = new ToolStripMenuItem("Associate to Current Dash");
         private ToolStripMenuItem _miRefreshHardware      = new ToolStripMenuItem("Refresh Data");
 
-        // Data binding
-        private readonly BindingSource _gridBinding = new BindingSource();
+        // Drawing Series context menus
+        private ContextMenuStrip  _drawingSeriesFileMenu  = new ContextMenuStrip();
+        private ToolStripMenuItem _miDsOpenFile           = new ToolStripMenuItem("Open File");
+        private ToolStripMenuItem _miDsOpenFileLocation   = new ToolStripMenuItem("Open File Location");
 
-        // Track current DataView for filtering (optional future use)
-        private DataView? _currentView;
+        private ContextMenuStrip  _drawingSeriesSheetMenu = new ContextMenuStrip();
+        private ToolStripMenuItem _miDsJumpToLayout       = new ToolStripMenuItem("Jump to Layout");
+        private ToolStripMenuItem _miDsEditSheet          = new ToolStripMenuItem("Edit Sheet Number / Subject");
 
         // Tracks the active document's service so we can unsubscribe cleanly
         private ProjectContextService? _currentNavSvc;
@@ -70,6 +77,7 @@ namespace IWCCadToolsV9.UI
             "Project Material List",
             "Project Hardware List",
             "Drawing Series List",
+            "Project Purchase Orders",
             "Shop Orders List",
             "Project Specifications",
             "Project Assets"
@@ -79,26 +87,19 @@ namespace IWCCadToolsV9.UI
         {
             InitializeComponent();
 
-            // Bind grid ONCE to the binding source
-            dataGrid.AutoGenerateColumns = true;
-            dataGrid.DataSource = _gridBinding;
-            dataGrid.ColumnHeadersVisible = true;
-            dataGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            dataGrid.ColumnHeadersHeight = 30;
-            dataGrid.EnableHeadersVisualStyles = true;
-            dataGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells;
-
-            // Make every generated column sortable
-            dataGrid.DataBindingComplete += (s, e) =>
+            // Open hyperlinks (e.g. vendor links rendered by DetailHtmlRenderer) in the
+            // user's default browser instead of navigating the detail pane itself.
+            detailBrowser.Navigating += (s, e) =>
             {
-                foreach (DataGridViewColumn col in dataGrid.Columns)
+                if (e.Url != null && (e.Url.Scheme == Uri.UriSchemeHttp || e.Url.Scheme == Uri.UriSchemeHttps))
                 {
-                    if (string.IsNullOrEmpty(col.HeaderText))
-                        col.HeaderText = col.DataPropertyName;
-                    col.SortMode = DataGridViewColumnSortMode.Automatic;
+                    e.Cancel = true;
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Url.ToString()) { UseShellExecute = true }); }
+                    catch { /* best-effort */ }
                 }
-                dataGrid.ColumnHeadersVisible = true;
             };
+
+            detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Select an item to view details.");
 
             SetupIcons();
             ConfigureTreeEvents();
@@ -106,6 +107,7 @@ namespace IWCCadToolsV9.UI
             InitMaterialContextMenu();
             InitHardwareContextMenu();
             InitDashFolderContextMenu();
+            InitDrawingSeriesContextMenus();
 
             // Subscribe to document switches so the tree refreshes on each drawing
             Application.DocumentManager.DocumentActivated += OnNavDocumentActivated;
@@ -187,6 +189,184 @@ namespace IWCCadToolsV9.UI
             _dashFolderMenu.Items.Add(_miDashFolderRefresh);
         }
 
+        private void InitDrawingSeriesContextMenus()
+        {
+            _miDsOpenFile.Click += (_, _) => OnDsOpenFile();
+            _miDsOpenFileLocation.Click += (_, _) => OnDsOpenFileLocation();
+            _drawingSeriesFileMenu.Items.Add(_miDsOpenFile);
+            _drawingSeriesFileMenu.Items.Add(_miDsOpenFileLocation);
+
+            _miDsJumpToLayout.Click += (_, _) => OnDsJumpToLayout();
+            _drawingSeriesSheetMenu.Items.Add(_miDsJumpToLayout);
+
+            _miDsEditSheet.Click += (_, _) => OnDsEditSheet();
+            _drawingSeriesSheetMenu.Items.Add(_miDsEditSheet);
+        }
+
+        private void OnDsOpenFile()
+        {
+            if (tree.SelectedNode?.Tag is not DrawingSeriesFileTag ft) return;
+            if (string.IsNullOrWhiteSpace(ft.FullPath)) return;
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ft.FullPath)
+                {
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to open file:\n{ex.Message}", "Drawing Series",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void OnDsOpenFileLocation()
+        {
+            if (tree.SelectedNode?.Tag is not DrawingSeriesFileTag ft) return;
+            if (string.IsNullOrWhiteSpace(ft.FullPath)) return;
+
+            if (!DrawingSeriesAcadHelper.TryOpenFileLocation(ft.FullPath))
+            {
+                MessageBox.Show($"Unable to open the file location for:\n{ft.FullPath}",
+                    "Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void OnDsJumpToLayout()
+        {
+            if (tree.SelectedNode?.Tag is not DrawingSeriesSheetTag st) return;
+
+            var sheetRecord = new DrawingSeriesSheetRecord
+            {
+                SheetId = st.SheetId,
+                FileId = st.FileId,
+                LayoutName = st.LayoutName ?? "",
+                SheetNumber = st.SheetNumber ?? "",
+                SheetSubject = st.SheetSubject ?? ""
+            };
+
+            bool ok = DrawingSeriesAcadHelper.TryApplySheetRecordToActiveDocument(sheetRecord, renameLayoutToSheetNumber: false);
+            if (!ok)
+            {
+                MessageBox.Show(
+                    $"Could not jump to layout '{st.LayoutName}'.\n\nMake sure the drawing file is open in AutoCAD:\n{st.FullPath}",
+                    "Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void OnDsEditSheet()
+        {
+            var node = tree.SelectedNode;
+            if (node?.Tag is not DrawingSeriesSheetTag st) return;
+
+            var sheet = new DrawingSeriesSheetRecord
+            {
+                SheetId = st.SheetId,
+                FileId = st.FileId,
+                LayoutName = st.LayoutName ?? "",
+                SheetNumber = st.SheetNumber ?? "",
+                SheetSubject = st.SheetSubject ?? ""
+            };
+
+            using var frm = new FrmDrawingSeriesSheetEdit(sheet);
+            if (frm.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                // IWC titleblocks derive the SHEET value from the paper-space layout tab name,
+                // so renaming the sheet number renames the layout tab; the SHEET attribute
+                // itself is not written directly.
+                string requestedLayoutName = !string.IsNullOrWhiteSpace(frm.SheetNumber)
+                    ? frm.SheetNumber.Trim()
+                    : sheet.LayoutName;
+
+                // Open/activate the drawing that contains this sheet so the layout tab and
+                // titleblock update the correct DWG (it may not be the active document).
+                if (!string.IsNullOrWhiteSpace(st.FullPath)
+                    && !DrawingSeriesAcadHelper.TryOpenDwg(st.FullPath))
+                {
+                    MessageBox.Show($"Unable to open the drawing that contains this sheet.\n\n{st.FullPath}",
+                        "Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var updated = sheet with
+                {
+                    LayoutName = requestedLayoutName,
+                    SheetNumber = frm.SheetNumber,
+                    SheetSubject = frm.SheetSubject
+                };
+
+                bool drawingUpdated = DrawingSeriesAcadHelper.TryApplySheetRecordToActiveDocument(updated, renameLayoutToSheetNumber: true);
+
+                var repo = new DrawingSeriesRepository();
+                repo.UpdateSheetAsync(sheet.SheetId, requestedLayoutName, frm.SheetNumber, frm.SheetSubject)
+                    .GetAwaiter().GetResult();
+
+                if (!drawingUpdated)
+                {
+                    MessageBox.Show("The database entry was updated, but the active drawing did not contain a matching logged layout/titleblock to update.",
+                        "Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
+                // Update node text/tag in place
+                node.Text = $"{updated.SheetNumber} - {updated.SheetSubject}";
+                node.Tag = DrawingSeriesSheetTag.Create(st.ProjectId, st.DashId, st.FileId, st.SheetId,
+                    st.FullPath ?? "", updated.LayoutName, updated.SheetNumber, updated.SheetSubject);
+                node.EnsureVisible();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to update sheet data.\n\n{ex.Message}",
+                    "Drawing Series", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ShowNodeDetails(TreeNode? node)
+        {
+            if (node?.Tag == null)
+            {
+                detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Select an item to view details.");
+                return;
+            }
+
+            switch (node.Tag)
+            {
+                case PlaceholderTag:
+                case LoaderTag:
+                    detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Loading...");
+                    return;
+
+                case ChildTag ct:
+                    detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage(
+                        $"{ct.ChildLabel}: select a sub-item or expand to load.");
+                    return;
+
+                case DashSectionTag st:
+                    detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage(
+                        $"Right-click '{st.Section}' and choose Refresh.");
+                    return;
+
+                case HdwItemTag hi:
+                {
+                    var extra = BuildExtraFieldsForTag(node.Tag);
+                    extra["TotalDashQty"] = GetTotalHardwareDashQty(hi.ItemId);
+                    detailBrowser.DocumentText = DetailHtmlRenderer.Render(node.Tag, extra);
+                    return;
+                }
+
+                default:
+                {
+                    var extra = BuildExtraFieldsForTag(node.Tag);
+                    detailBrowser.DocumentText = DetailHtmlRenderer.Render(node.Tag, extra);
+                    return;
+                }
+            }
+        }
+
+
         private void RefreshSelectedProjectNode()
         {
             if (tree.SelectedNode?.Tag is ProjectTag pt)
@@ -242,6 +422,14 @@ namespace IWCCadToolsV9.UI
                 {
                     LoadShopOrdersForProject(node, ct.ProjectId);
                 }
+                else if (ct.ChildLabel.Equals("Drawing Series List", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadDrawingSeriesForProject(node, ct.ProjectId);
+                }
+                else if (ct.ChildLabel.Equals("Project Purchase Orders", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadPurchaseOrdersForProject(node, ct.ProjectId);
+                }
                 else
                 {
                     node.Nodes.Add(new TreeNode("(refresh loader not implemented yet)")
@@ -252,7 +440,7 @@ namespace IWCCadToolsV9.UI
                 }
 
                 node.Expand();
-                UpdateGrid(CreateEmptyTable($"{ct.ChildLabel} refreshed."), "Info");
+                detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage($"{ct.ChildLabel} refreshed.");
             }
             catch (Exception ex)
             {
@@ -336,6 +524,14 @@ namespace IWCCadToolsV9.UI
             else if (node.Tag is DashSectionTag && _dashFolderMenu != null)
             {
                 _dashFolderMenu.Show(tree, location);
+            }
+            else if (node.Tag is DrawingSeriesFileTag)
+            {
+                _drawingSeriesFileMenu.Show(tree, location);
+            }
+            else if (node.Tag is DrawingSeriesSheetTag)
+            {
+                _drawingSeriesSheetMenu.Show(tree, location);
             }
             else if (node.Tag is ProjectTag)
             {
@@ -822,6 +1018,12 @@ namespace IWCCadToolsV9.UI
                     if (child.Equals("Shop Orders List", StringComparison.OrdinalIgnoreCase))
                         childNode.Nodes.Add(new TreeNode("...Load Shop Orders")   { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("ShopOrdersLoader") });
 
+                    if (child.Equals("Drawing Series List", StringComparison.OrdinalIgnoreCase))
+                        childNode.Nodes.Add(new TreeNode("...Load Drawing Series") { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("DrawingSeriesLoader") });
+
+                    if (child.Equals("Project Purchase Orders", StringComparison.OrdinalIgnoreCase))
+                        childNode.Nodes.Add(new TreeNode("...Load Purchase Orders") { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("POListLoader") });
+
                     parent.Nodes.Add(childNode);
                 }
 
@@ -873,6 +1075,12 @@ namespace IWCCadToolsV9.UI
                 if (child.Equals("Shop Orders List", StringComparison.OrdinalIgnoreCase))
                     childNode.Nodes.Add(new TreeNode("...Load Shop Orders") { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("ShopOrdersLoader") });
 
+                if (child.Equals("Drawing Series List", StringComparison.OrdinalIgnoreCase))
+                    childNode.Nodes.Add(new TreeNode("...Load Drawing Series") { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("DrawingSeriesLoader") });
+
+                if (child.Equals("Project Purchase Orders", StringComparison.OrdinalIgnoreCase))
+                    childNode.Nodes.Add(new TreeNode("...Load Purchase Orders") { ImageKey = IconKeyFolder, SelectedImageKey = IconKeyFolder, Tag = PlaceholderTag.For("POListLoader") });
+
                 parent.Nodes.Add(childNode);
             }
 
@@ -917,6 +1125,18 @@ namespace IWCCadToolsV9.UI
             try { dashHdw = IWCCadToolsV9.Properties.Resources.IWCTreeHdwFolder; } catch { }
             dashHdw ??= dashFolder;
             images.Images.Add(IconKeyDashHdwFolder, dashHdw);
+
+            // AutoCAD DWG file icon (Drawing Series sheet nodes)
+            Image dwgFile = null;
+            try { dwgFile = IWCCadToolsV9.Properties.Resources.IWCDwg?.ToBitmap(); } catch { }
+            dwgFile ??= dt;
+            images.Images.Add(IconKeyDwgFile, dwgFile);
+
+            // Purchase Order icon (Project Purchase Orders nodes)
+            Image poIcon = null;
+            try { poIcon = IWCCadToolsV9.Properties.Resources.IWCTreePOIcon; } catch { }
+            poIcon ??= dt;
+            images.Images.Add(IconKeyPO, poIcon);
         }
 
 
@@ -947,6 +1167,78 @@ namespace IWCCadToolsV9.UI
         {
             try { return factory(); }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// If DetailFieldMap.json defines a "query" for this tag's type, runs
+        /// SELECT * FROM {Table} WHERE {KeyColumn} = @key (using the tag property
+        /// named by KeyField as @key) and returns the result row's columns as a
+        /// dictionary suitable for DetailHtmlRenderer.Render's extraFields parameter.
+        /// Returns an empty dictionary if no query is configured, the key value is
+        /// null, or the query fails/returns no row.
+        /// </summary>
+        private Dictionary<string, object?> BuildExtraFieldsForTag(object tag)
+        {
+            var result = new Dictionary<string, object?>();
+
+            var queryDef = DetailHtmlRenderer.GetQueryDef(tag);
+            if (queryDef == null) return result;
+
+            object? keyValue = DetailHtmlRenderer.GetKeyFieldValue(tag, queryDef);
+            if (keyValue == null) return result;
+
+            try
+            {
+                using var conn = GetOpenSqlConnection();
+                // Table/KeyColumn are validated as simple identifiers when the field
+                // map is loaded (see DetailHtmlRenderer.IsValidIdentifier); the key
+                // value itself is always parameterized.
+                using var cmd = new SqlCommand(
+                    $"SELECT * FROM {queryDef.Table} WHERE {queryDef.KeyColumn} = @key;", conn);
+                cmd.Parameters.AddWithValue("@key", keyValue);
+
+                using var rdr = cmd.ExecuteReader();
+                if (rdr.Read())
+                {
+                    for (int i = 0; i < rdr.FieldCount; i++)
+                    {
+                        string colName = rdr.GetName(i);
+                        object? value = rdr.IsDBNull(i) ? null : rdr.GetValue(i);
+
+                        // Tag properties take precedence; only fill in columns not
+                        // already present as a property on the tag object.
+                        if (tag.GetType().GetProperty(colName, BindingFlags.Public | BindingFlags.Instance) == null)
+                            result[colName] = value;
+                    }
+                }
+            }
+            catch
+            {
+                // Detail-pane lookups are best-effort; missing data shouldn't break the UI.
+            }
+
+            return result;
+        }
+
+
+        /// item (HdwID). Used by the Project Hardware List detail pane to show
+        /// total quantity used project-wide for this hardware item.
+        /// </summary>
+        private long? GetTotalHardwareDashQty(int hdwItemId)
+        {
+            try
+            {
+                using var conn = GetOpenSqlConnection();
+                using var cmd = new SqlCommand(
+                    @"SELECT SUM(HdwQty) FROM dbo.Proj_Hdw_Dash WHERE HdwID = @hid;", conn);
+                cmd.Parameters.AddWithValue("@hid", hdwItemId);
+                object? result = cmd.ExecuteScalar();
+                return result == null || result == DBNull.Value ? 0L : Convert.ToInt64(result);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static T SafeGet<T>(SqlDataReader rdr, string colName, T fallback = default)
@@ -984,94 +1276,10 @@ namespace IWCCadToolsV9.UI
 
         private void ConfigureTreeEvents()
         {
-            // When a node is selected, show details / run queries
+            // When a node is selected, show detail information on the right
             tree.AfterSelect += (s, e) =>
             {
-                // Hardware item leaf (Project Hardware List) → show details in grid
-                if (e.Node?.Tag is HdwItemTag hi)
-                {
-                    var t = new DataTable("Hardware");
-                    t.Columns.Add("ItemID", typeof(int));
-                    t.Columns.Add("GroupID", typeof(int));
-                    t.Columns.Add("HdwNo", typeof(string));
-                    t.Columns.Add("HdwDesc", typeof(string));
-                    t.Rows.Add(hi.ItemId, hi.GroupId, hi.HdwNo, hi.HdwDesc);
-                    UpdateGrid(t, "Hardware");
-                    return;
-                }
-
-                // Material item leaf (Project Material List) → show details in grid
-                if (e.Node?.Tag is MatItemTag mi)
-                {
-                    var t = new DataTable("Material");
-                    t.Columns.Add("ItemID", typeof(int));
-                    t.Columns.Add("GroupID", typeof(int));
-                    t.Columns.Add("MatNo", typeof(string));
-                    t.Columns.Add("MatDesc", typeof(string));
-                    t.Rows.Add(mi.ItemId, mi.GroupId, mi.MatNo, mi.MatDesc);
-                    UpdateGrid(t, "Material");
-                    return;
-                }
-
-                // Selecting a series/component dash → small summary
-                if (e.Node?.Tag is DashTag dt)
-                {
-                    var t = new DataTable("Dash");
-                    t.Columns.Add("DashID", typeof(int));
-                    t.Columns.Add("DashNum", typeof(string));
-                    t.Columns.Add("Desc", typeof(string));
-                    t.Rows.Add(dt.DashId, dt.DashNumText, dt.DashDesc);
-                    UpdateGrid(t, "Dash");
-                    return;
-                }
-
-                // Dash → Materials → leaf (dash-scoped materials)
-                if (e.Node?.Tag is MatDashItemTag mdi)
-                {
-                    var t = new DataTable("DashMaterial");
-                    t.Columns.Add("ItemID", typeof(int));
-                    t.Columns.Add("DashID", typeof(int));
-                    t.Columns.Add("MatGroup", typeof(string));
-                    t.Columns.Add("MatNo", typeof(string));
-                    t.Columns.Add("MatDesc", typeof(string));
-                    t.Rows.Add(mdi.ItemId, mdi.SeriesDashId, mdi.MatGroup, mdi.MatNo, mdi.MatDesc);
-                    UpdateGrid(t, "Dash Material");
-                    return;
-                }
-                if (e.Node?.Tag is DashPOItemTag poi)
-                {
-                    var t = new DataTable("PO Item");
-                    t.Columns.Add("PONum", typeof(string));
-                    t.Columns.Add("Component", typeof(string));
-                    t.Columns.Add("Description", typeof(string));
-                    t.Columns.Add("PO_ID", typeof(int));
-                    t.Columns.Add("ID", typeof(int));
-                    t.Rows.Add(poi.PONum, poi.Name_Comp, poi.ItemProductDesc,
-                               poi.POId.GetValueOrDefault(), poi.POItemId.GetValueOrDefault());
-                    UpdateGrid(t, "PO Item");
-                    return;
-                }
-
-                // Selecting a top-level project → prompt user to choose a child
-                if (e.Node?.Tag is ProjectTag)
-                {
-                    UpdateGrid(CreateEmptyTable("Select a child node to view data."), "Info");
-                    return;
-                }
-
-                // Selecting an unhandled child node → placeholder
-                if (e.Node?.Tag is ChildTag ct)
-                {
-                    UpdateGrid(CreateEmptyTable($"{ct.ChildLabel}: select a sub-item or expand to load."), "Info");
-                    return;
-                }
-
-                // Selecting a dash section folder (Materials/Hardware/PO Items/Shop Orders/Assets) → placeholder
-                if (e.Node?.Tag is DashSectionTag st)
-                {
-                    UpdateGrid(CreateEmptyTable($"Right-click '{st.Section}' and choose Refresh."), "Info");
-                    return;
-                }
+                ShowNodeDetails(e.Node);
             };
 
             // Right-click selects node and shows appropriate context menu
@@ -1154,6 +1362,40 @@ namespace IWCCadToolsV9.UI
                     return;
                 }
 
+                // Project-level: Drawing Series List
+                if (e.Node?.Tag is ChildTag dsCt &&
+                    dsCt.ChildLabel.Equals("Drawing Series List", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (e.Node.Nodes.Count == 1 && e.Node.Nodes[0].Tag is PlaceholderTag dsp
+                        && string.Equals(dsp.Purpose, "DrawingSeriesLoader", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { LoadDrawingSeriesForProject(e.Node, dsCt.ProjectId); }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Failed to load drawing series:\n{ex.Message}", "Project Navigator",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    return;
+                }
+
+                // Project-level: Project Purchase Orders
+                if (e.Node?.Tag is ChildTag poCt &&
+                    poCt.ChildLabel.Equals("Project Purchase Orders", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (e.Node.Nodes.Count == 1 && e.Node.Nodes[0].Tag is PlaceholderTag pop
+                        && string.Equals(pop.Purpose, "POListLoader", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { LoadPurchaseOrdersForProject(e.Node, poCt.ProjectId); }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Failed to load purchase orders:\n{ex.Message}", "Project Navigator",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    return;
+                }
+
                 // Unified Dash-level: Materials / Hardware / etc.  (single branch only)
                 if (e.Node?.Tag is DashSectionTag dst)
                 {
@@ -1208,14 +1450,6 @@ namespace IWCCadToolsV9.UI
                 }
 
             };
-        }
-
-        private static DataTable CreateEmptyTable(string message)
-        {
-            var t = new DataTable("Info");
-            t.Columns.Add("Message", typeof(string));
-            t.Rows.Add(message);
-            return t;
         }
 
         private static bool HasOnlyPlaceholder(TreeNode node, string? purpose = null)
@@ -1901,9 +2135,106 @@ namespace IWCCadToolsV9.UI
             public override string ToString() => $"{PONum} - {Name_Comp}: {ItemProductDesc}";
         }
 
-        #endregion
+        // Drawing Series: series-dash folder (top-level under Drawing Series List)
+        private sealed class DrawingSeriesNodeTag
+        {
+            public int ProjectId { get; }
+            public int DashId { get; }
+            public string? DashNum { get; }
+            public string? DashDesc { get; }
 
-        #region Designer host convenience
+            private DrawingSeriesNodeTag(int projectId, int dashId, string dashNum, string dashDesc)
+            {
+                ProjectId = projectId; DashId = dashId; DashNum = dashNum ?? ""; DashDesc = dashDesc ?? "";
+            }
+            public static DrawingSeriesNodeTag Create(int projectId, int dashId, string dashNum, string dashDesc)
+                => new DrawingSeriesNodeTag(projectId, dashId, dashNum, dashDesc);
+            public override string ToString() => $"{DashNum} - {DashDesc}";
+        }
+
+        // Drawing Series: logged file node (first child of a series node)
+        private sealed class DrawingSeriesFileTag
+        {
+            public int ProjectId { get; }
+            public int DashId { get; }
+            public int FileId { get; }
+            public string? FullPath { get; }
+            public string? FileName { get; }
+
+            private DrawingSeriesFileTag(int projectId, int dashId, int fileId, string fullPath, string fileName)
+            {
+                ProjectId = projectId; DashId = dashId; FileId = fileId;
+                FullPath = fullPath ?? ""; FileName = fileName ?? "";
+            }
+            public static DrawingSeriesFileTag Create(int projectId, int dashId, int fileId, string fullPath, string fileName)
+                => new DrawingSeriesFileTag(projectId, dashId, fileId, fullPath, fileName);
+            public override string ToString() => $"{FileName} ({FullPath})";
+        }
+
+        // Drawing Series: logged sheet node (child of a file node)
+        private sealed class DrawingSeriesSheetTag
+        {
+            public int ProjectId { get; }
+            public int DashId { get; }
+            public int FileId { get; }
+            public int SheetId { get; }
+            public string? FullPath { get; }
+            public string? LayoutName { get; }
+            public string? SheetNumber { get; }
+            public string? SheetSubject { get; }
+
+            private DrawingSeriesSheetTag(int projectId, int dashId, int fileId, int sheetId,
+                string fullPath, string layoutName, string sheetNumber, string sheetSubject)
+            {
+                ProjectId = projectId; DashId = dashId; FileId = fileId; SheetId = sheetId;
+                FullPath = fullPath ?? ""; LayoutName = layoutName ?? "";
+                SheetNumber = sheetNumber ?? ""; SheetSubject = sheetSubject ?? "";
+            }
+            public static DrawingSeriesSheetTag Create(int projectId, int dashId, int fileId, int sheetId,
+                string fullPath, string layoutName, string sheetNumber, string sheetSubject)
+                => new DrawingSeriesSheetTag(projectId, dashId, fileId, sheetId, fullPath, layoutName, sheetNumber, sheetSubject);
+            public override string ToString() => $"{SheetNumber} - {SheetSubject} [{LayoutName}]";
+        }
+
+        // Project Purchase Orders: PO header node (PONum - Vendor Name)
+        private sealed class POHeaderTag
+        {
+            public int ProjectId { get; }
+            public string? PONum { get; }
+            public string? VendorName { get; }
+            public int? POId { get; }
+
+            private POHeaderTag(int projectId, string poNum, string vendorName, int? poId)
+            {
+                ProjectId = projectId; PONum = poNum ?? ""; VendorName = vendorName ?? ""; POId = poId;
+            }
+            public static POHeaderTag Create(int projectId, string poNum, string vendorName, int? poId)
+                => new POHeaderTag(projectId, poNum, vendorName, poId);
+            public override string ToString() => $"{PONum} - {VendorName}";
+        }
+
+        // Project Purchase Orders: PO line item node (Item - Description - Qty - Units)
+        private sealed class POLineItemTag
+        {
+            public int ProjectId { get; }
+            public string? PONum { get; }
+            public string? Item { get; }
+            public string? Description { get; }
+            public decimal? Qty { get; }
+            public string? Units { get; }
+            public int? POItemId { get; }
+
+            private POLineItemTag(int projectId, string poNum, string item, string description, decimal? qty, string units, int? poItemId)
+            {
+                ProjectId = projectId; PONum = poNum ?? ""; Item = item ?? "";
+                Description = description ?? ""; Qty = qty; Units = units ?? ""; POItemId = poItemId;
+            }
+            public static POLineItemTag Create(int projectId, string poNum, string item, string description, decimal? qty, string units, int? poItemId)
+                => new POLineItemTag(projectId, poNum, item, description, qty, units, poItemId);
+            public override string ToString() => $"{Item} - {Description} - {Qty} {Units}";
+        }
+
+
 
         protected override void OnCreateControl()
         {
@@ -1933,7 +2264,7 @@ namespace IWCCadToolsV9.UI
             tree.CollapseAll();
             tree.EndUpdate();
 
-            UpdateGrid(CreateEmptyTable("Design-time preview"), "Info");
+            detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Design-time preview");
         }
 
         #endregion
@@ -2005,22 +2336,7 @@ namespace IWCCadToolsV9.UI
 
         #endregion
 
-        #region Data loading & grid update
-
-        private void UpdateGrid(DataTable table, string friendlyName)
-        {
-            if (table != null)
-            {
-                _currentView = table.DefaultView;
-            }
-            else
-            {
-                var empty = CreateEmptyTable($"{friendlyName}: no data");
-                _currentView = empty.DefaultView;
-            }
-
-            _gridBinding.DataSource = _currentView;
-        }
+        #region Data loading
 
         // --- Project-level list loaders (left-side fixed children) ---
 
@@ -2183,9 +2499,180 @@ namespace IWCCadToolsV9.UI
             }
         }
 
+        // --- Drawing Series List loader ---
+
+        private void LoadDrawingSeriesForProject(TreeNode seriesListNode, int projectId)
+        {
+            if (seriesListNode == null) return;
+
+            seriesListNode.Nodes.Clear();
+
+            var repo = new DrawingSeriesRepository();
+
+            IReadOnlyList<DrawingSeriesDashNode> dashNodes;
+            try
+            {
+                dashNodes = repo.GetDrawingSeriesByProjectAsync(projectId).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                seriesListNode.Nodes.Add(new TreeNode($"(failed to load drawing series: {ex.Message})")
+                {
+                    ImageKey = IconKeyDataTable,
+                    SelectedImageKey = IconKeyDataTable,
+                    Tag = PlaceholderTag.For("DrawingSeriesLoadFailed")
+                });
+                return;
+            }
+
+            if (dashNodes.Count == 0)
+            {
+                seriesListNode.Nodes.Add(new TreeNode("(no logged drawing series found)")
+                {
+                    ImageKey = IconKeyDataTable,
+                    SelectedImageKey = IconKeyDataTable,
+                    Tag = PlaceholderTag.For("EmptyDrawingSeries")
+                });
+                return;
+            }
+
+            foreach (var dashNode in dashNodes)
+            {
+                var seriesNode = new TreeNode($"{dashNode.DashNum} - {dashNode.DashDesc}")
+                {
+                    ImageKey = IconKeyDashFolder,
+                    SelectedImageKey = IconKeyDashFolder,
+                    Tag = DrawingSeriesNodeTag.Create(projectId, dashNode.DashId, dashNode.DashNum, dashNode.DashDesc)
+                };
+
+                foreach (var file in dashNode.Files)
+                {
+                    var fileNode = new TreeNode(file.FileName)
+                    {
+                        ImageKey = IconKeyDataTable,
+                        SelectedImageKey = IconKeyDataTable,
+                        Tag = DrawingSeriesFileTag.Create(projectId, dashNode.DashId, file.FileId, file.FullPath, file.FileName),
+                        ContextMenuStrip = _drawingSeriesFileMenu
+                    };
+
+                    foreach (var sheet in file.Sheets)
+                    {
+                        var sheetNode = new TreeNode($"{sheet.SheetNumber} - {sheet.SheetSubject}")
+                        {
+                            ImageKey = IconKeyDwgFile,
+                            SelectedImageKey = IconKeyDwgFile,
+                            Tag = DrawingSeriesSheetTag.Create(projectId, dashNode.DashId, file.FileId, sheet.SheetId,
+                                      file.FullPath, sheet.LayoutName, sheet.SheetNumber, sheet.SheetSubject),
+                            ContextMenuStrip = _drawingSeriesSheetMenu
+                        };
+                        fileNode.Nodes.Add(sheetNode);
+                    }
+
+                    seriesNode.Nodes.Add(fileNode);
+                }
+
+                if (seriesNode.Nodes.Count == 0)
+                {
+                    seriesNode.Nodes.Add(new TreeNode("(no logged files for this series)")
+                    {
+                        ImageKey = IconKeyDataTable,
+                        SelectedImageKey = IconKeyDataTable,
+                        Tag = PlaceholderTag.For("EmptyDrawingSeriesFiles")
+                    });
+                }
+
+                seriesListNode.Nodes.Add(seriesNode);
+            }
+        }
+
+        // --- Project Purchase Orders loader ---
+
+        private void LoadPurchaseOrdersForProject(TreeNode poListNode, int projectId)
+        {
+            if (poListNode == null) return;
+
+            poListNode.Nodes.Clear();
+
+            var dt = new DataTable();
+            using (var conn = GetOpenSqlConnection())
+            using (var da = new SqlDataAdapter(@"
+                SELECT
+                    Proj_ID,
+                    PONum,
+                    Name_Comp,
+                    PO_Id,
+                    ItemProductNo,
+                    ItemProductDesc,
+                    ItemQty,
+                    ItemQtyUnit
+                FROM dbo.PurchPO_CompileItem
+                WHERE Proj_ID = @pid
+                ORDER BY TRY_CAST(PONum AS int) DESC, PONum DESC, ItemPoRow;", conn))
+            {
+                da.SelectCommand.Parameters.AddWithValue("@pid", projectId);
+                da.Fill(dt);
+            }
+
+            var poNodeByNum = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (DataRow r in dt.Rows)
+            {
+                string poNum = SafeStr(r, "PONum") ?? "";
+                string vendorName = SafeStr(r, "Name_Comp") ?? "";
+                int? poId = SafeIntOrNull(r, "PO_Id");
+
+                if (!poNodeByNum.TryGetValue(poNum, out var poNode))
+                {
+                    poNode = new TreeNode($"{poNum} - {vendorName}")
+                    {
+                        ImageKey = IconKeyPO,
+                        SelectedImageKey = IconKeyPO,
+                        Tag = POHeaderTag.Create(projectId, poNum, vendorName, poId)
+                    };
+                    poListNode.Nodes.Add(poNode);
+                    poNodeByNum[poNum] = poNode;
+                }
+
+                string item = SafeStr(r, "ItemProductNo") ?? "";
+                string desc = SafeStr(r, "ItemProductDesc") ?? "";
+                string units = SafeStr(r, "ItemQtyUnit") ?? "";
+                decimal? qty = null;
+                if (r.Table.Columns.Contains("ItemQty") && r["ItemQty"] != DBNull.Value)
+                {
+                    try { qty = Convert.ToDecimal(r["ItemQty"]); } catch { /* ignore */ }
+                }
+
+                // Collapse multi-line item descriptions (notes/instructions) to a single
+                // line for the tree; full text remains available via the tag if needed.
+                string descSingleLine = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ").Trim();
+                if (descSingleLine.Length > 120)
+                    descSingleLine = descSingleLine.Substring(0, 117) + "...";
+
+                string qtyText = qty.HasValue ? qty.Value.ToString("0.###") : "";
+
+                var itemNode = new TreeNode($"{item} - {descSingleLine} - {qtyText} {units}".Trim())
+                {
+                    ImageKey = IconKeyPO,
+                    SelectedImageKey = IconKeyPO,
+                    Tag = POLineItemTag.Create(projectId, poNum, item, desc, qty, units, poId)
+                };
+                poNode.Nodes.Add(itemNode);
+            }
+
+            if (poListNode.Nodes.Count == 0)
+            {
+                poListNode.Nodes.Add(new TreeNode("(no purchase orders found)")
+                {
+                    ImageKey = IconKeyDataTable,
+                    SelectedImageKey = IconKeyDataTable,
+                    Tag = PlaceholderTag.For("EmptyPOs")
+                });
+            }
+        }
+
+
         private void LoadShopOrdersForProject(TreeNode shopListNode, int projectId)
         {
-            if (shopListNode == null) return;
 
             if (shopListNode.Nodes.Count == 1 && shopListNode.Nodes[0].Tag is PlaceholderTag)
                 shopListNode.Nodes.Clear();

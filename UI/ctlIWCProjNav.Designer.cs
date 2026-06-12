@@ -6,7 +6,7 @@
 
         private System.Windows.Forms.SplitContainer split;
         private System.Windows.Forms.TreeView tree;
-        private System.Windows.Forms.DataGridView dataGrid;
+        private System.Windows.Forms.WebBrowser detailBrowser;
         private System.Windows.Forms.ImageList images;
 
         protected override void Dispose(bool disposing)
@@ -28,12 +28,11 @@
             split = new SplitContainer();
             tree = new TreeView();
             images = new ImageList(components);
-            dataGrid = new DataGridView();
+            detailBrowser = new WebBrowser();
             ((System.ComponentModel.ISupportInitialize)split).BeginInit();
             split.Panel1.SuspendLayout();
             split.Panel2.SuspendLayout();
             split.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)dataGrid).BeginInit();
             SuspendLayout();
             // 
             // split
@@ -49,7 +48,7 @@
             // 
             // split.Panel2
             // 
-            split.Panel2.Controls.Add(dataGrid);
+            split.Panel2.Controls.Add(detailBrowser);
             split.Size = new Size(1100, 650);
             split.SplitterDistance = 290;
             split.TabIndex = 0;
@@ -74,21 +73,14 @@
             images.ImageSize = new Size(20, 20);
             images.TransparentColor = Color.Transparent;
             // 
-            // dataGrid
+            // detailBrowser
             // 
-            dataGrid.AllowUserToAddRows = false;
-            dataGrid.AllowUserToDeleteRows = false;
-            dataGrid.AllowUserToOrderColumns = true;
-            dataGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells;
-            dataGrid.Dock = DockStyle.Fill;
-            dataGrid.Location = new Point(0, 0);
-            dataGrid.MultiSelect = false;
-            dataGrid.Name = "dataGrid";
-            dataGrid.ReadOnly = true;
-            dataGrid.RowHeadersVisible = false;
-            dataGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dataGrid.Size = new Size(806, 650);
-            dataGrid.TabIndex = 0;
+            detailBrowser.Dock = DockStyle.Fill;
+            detailBrowser.Location = new Point(0, 0);
+            detailBrowser.Name = "detailBrowser";
+            detailBrowser.ScriptErrorsSuppressed = true;
+            detailBrowser.Size = new Size(806, 650);
+            detailBrowser.TabIndex = 0;
             // 
             // ctlIWCProjNav
             // 
@@ -100,7 +92,6 @@
             split.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)split).EndInit();
             split.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)dataGrid).EndInit();
             ResumeLayout(false);
         }
     }

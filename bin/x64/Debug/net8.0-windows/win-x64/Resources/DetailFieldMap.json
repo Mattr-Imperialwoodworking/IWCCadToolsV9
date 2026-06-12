@@ -1,0 +1,191 @@
+{
+  "ProjectTag": {
+    "title": "Project",
+    "fields": [
+      { "key": "ProjectNum",  "caption": "Project Number", "order": 1 },
+      { "key": "ProjectName", "caption": "Project Name",   "order": 2 },
+      { "key": "ProjectId",   "caption": "Project ID",     "order": 3 }
+    ]
+  },
+  "ChildTag": {
+    "title": "{ChildLabel}",
+    "fields": [
+      { "key": "ChildLabel", "caption": "Section",    "order": 1 },
+      { "key": "ProjectId",  "caption": "Project ID", "order": 2 }
+    ]
+  },
+  "DashSectionTag": {
+    "title": "{Section}",
+    "fields": [
+      { "key": "Section",      "caption": "Section",       "order": 1 },
+      { "key": "SeriesDashId", "caption": "Dash ID",       "order": 2 },
+      { "key": "ProjectId",    "caption": "Project ID",    "order": 3 }
+    ]
+  },
+  "DashTag": {
+    "title": "Dash {DashNumDisplay}",
+    "fields": [
+      { "key": "DashNumDisplay", "caption": "Dash Number",  "order": 1 },
+      { "key": "DashDesc",       "caption": "Description",  "order": 2 },
+      { "key": "DashId",         "caption": "Dash ID",      "order": 3 },
+      { "key": "ProjectId",      "caption": "Project ID",   "order": 4 }
+    ]
+  },
+  "HdwItemTag": {
+    "title": "Hardware Item",
+    "query": {
+      "table": "dbo.Proj_HdwCompile",
+      "keyColumn": "ID",
+      "keyField": "ItemId"
+    },
+    "fields": [
+      { "key": "HdwNo",   "caption": "Hardware Number", "order": 1 },
+      { "key": "HdwDesc", "caption": "Description",     "order": 2 },
+      { "key": "TotalDashQty", "caption": "Total Qty Used (All Dashes)", "order": 3, "format": "{0:N0}" },
+
+      { "key": "HdwMfr",  "caption": "Manufacturer",    "order": 10 },
+      { "key": "HdwCost", "caption": "Unit Cost",       "order": 11, "format": "{0:C}" },
+
+      { "key": "GroupId", "caption": "Group ID",        "order": 90 },
+      { "key": "ItemId",  "caption": "Item ID",         "order": 91 }
+    ]
+  },
+  "HdwGroupTag": {
+    "title": "Hardware Group",
+    "fields": [
+      { "key": "GroupTag",  "caption": "Group Tag",  "order": 1 },
+      { "key": "GroupName", "caption": "Group Name", "order": 2 },
+      { "key": "GroupId",   "caption": "Group ID",   "order": 3 }
+    ]
+  },
+  "MatItemTag": {
+    "title": "Material Item",
+    "fields": [
+      { "key": "MatNo",   "caption": "Material Number", "order": 1 },
+      { "key": "MatDesc", "caption": "Description",     "order": 2 },
+      { "key": "GroupId", "caption": "Group ID",        "order": 3 },
+      { "key": "ItemId",  "caption": "Item ID",         "order": 4 }
+    ]
+  },
+  "MatGroupTag": {
+    "title": "Material Group",
+    "fields": [
+      { "key": "GroupName", "caption": "Group Name", "order": 1 },
+      { "key": "GroupId",   "caption": "Group ID",   "order": 2 }
+    ]
+  },
+  "MatDashGroupTag": {
+    "title": "Material Group (Dash)",
+    "fields": [
+      { "key": "MatGroup",     "caption": "Material Group", "order": 1 },
+      { "key": "SeriesDashId", "caption": "Dash ID",        "order": 2 }
+    ]
+  },
+  "MatDashItemTag": {
+    "title": "Dash Material",
+    "fields": [
+      { "key": "MatNo",        "caption": "Material Number", "order": 1 },
+      { "key": "MatDesc",      "caption": "Description",     "order": 2 },
+      { "key": "MatGroup",     "caption": "Material Group",  "order": 3 },
+      { "key": "SeriesDashId", "caption": "Dash ID",         "order": 4 },
+      { "key": "ItemId",       "caption": "Item ID",         "order": 5 }
+    ]
+  },
+  "ShopOrderTag": {
+    "title": "Shop Order {SONumber}",
+    "fields": [
+      { "key": "SONumber",       "caption": "Shop Order Number", "order": 1 },
+      { "key": "SODesc",         "caption": "Description",       "order": 2 },
+      { "key": "DateActualShip", "caption": "Actual Ship Date",  "order": 3, "format": "{0:MM/dd/yyyy}" },
+      { "key": "SOId",           "caption": "Shop Order ID",     "order": 4 }
+    ]
+  },
+  "DashHardwareGroupTag": {
+    "title": "Hardware Group (Dash)",
+    "fields": [
+      { "key": "HdwGroupTag", "caption": "Group Tag",  "order": 1 },
+      { "key": "HdwGroupNo",  "caption": "Group No.",  "order": 2 },
+      { "key": "HdwGroupId",  "caption": "Group ID",   "order": 3 },
+      { "key": "DashId",      "caption": "Dash ID",    "order": 4 }
+    ]
+  },
+  "DashHardwareItemTag": {
+    "title": "Hardware Item (Dash)",
+    "fields": [
+      { "key": "HdwNo",       "caption": "Hardware Number", "order": 1 },
+      { "key": "HdwDesc",     "caption": "Description",     "order": 2 },
+      { "key": "Name_Comp",   "caption": "Component Name",  "order": 3 },
+      { "key": "Comp_Type",   "caption": "Component Type",  "order": 4 },
+      { "key": "HdwQty",      "caption": "Quantity",        "order": 5 },
+      { "key": "HdwUnit",     "caption": "Unit",            "order": 6 },
+      { "key": "HdwGroupTag", "caption": "Group Tag",       "order": 7 },
+      { "key": "HdwGroupNo",  "caption": "Group No.",       "order": 8 },
+      { "key": "HdwVendorId", "caption": "Vendor ID",       "order": 9 },
+      { "key": "HdwApprove",  "caption": "Approved Date",   "order": 10, "format": "{0:MM/dd/yyyy}" },
+      { "key": "HdwEdit",     "caption": "Last Edited",     "order": 11, "format": "{0:MM/dd/yyyy}" },
+      { "key": "HdwNotes",    "caption": "Notes",           "order": 12 },
+      { "key": "HdwRQID",     "caption": "Request ID",      "order": 13 },
+      { "key": "Id",          "caption": "Item ID",         "order": 14 }
+    ]
+  },
+  "DashPOItemTag": {
+    "title": "PO Item (Dash)",
+    "fields": [
+      { "key": "PONum",           "caption": "PO Number",   "order": 1 },
+      { "key": "Name_Comp",       "caption": "Vendor",      "order": 2 },
+      { "key": "ItemProductDesc", "caption": "Description", "order": 3 },
+      { "key": "POId",            "caption": "PO ID",       "order": 4 },
+      { "key": "POItemId",        "caption": "PO Item ID",  "order": 5 },
+      { "key": "DashId",          "caption": "Dash ID",     "order": 6 }
+    ]
+  },
+  "DrawingSeriesNodeTag": {
+    "title": "Drawing Series {DashNum}",
+    "fields": [
+      { "key": "DashNum",  "caption": "Series Number", "order": 1 },
+      { "key": "DashDesc", "caption": "Description",   "order": 2 },
+      { "key": "DashId",   "caption": "Dash ID",       "order": 3 }
+    ]
+  },
+  "DrawingSeriesFileTag": {
+    "title": "Drawing File",
+    "fields": [
+      { "key": "FileName", "caption": "File Name", "order": 1 },
+      { "key": "FullPath", "caption": "Full Path", "order": 2 },
+      { "key": "DashId",   "caption": "Dash ID",   "order": 3 },
+      { "key": "FileId",   "caption": "File ID",   "order": 4 }
+    ]
+  },
+  "DrawingSeriesSheetTag": {
+    "title": "Sheet {SheetNumber}",
+    "fields": [
+      { "key": "SheetNumber",  "caption": "Sheet Number",  "order": 1 },
+      { "key": "SheetSubject", "caption": "Subject",       "order": 2 },
+      { "key": "LayoutName",   "caption": "Layout Name",   "order": 3 },
+      { "key": "FullPath",     "caption": "Drawing File",  "order": 4 },
+      { "key": "SheetId",      "caption": "Sheet ID",      "order": 5 },
+      { "key": "FileId",       "caption": "File ID",       "order": 6 },
+      { "key": "DashId",       "caption": "Dash ID",       "order": 7 }
+    ]
+  },
+  "POHeaderTag": {
+    "title": "Purchase Order {PONum}",
+    "fields": [
+      { "key": "PONum",      "caption": "PO Number",   "order": 1 },
+      { "key": "VendorName", "caption": "Vendor",      "order": 2 },
+      { "key": "POId",       "caption": "PO ID",       "order": 3 },
+      { "key": "ProjectId",  "caption": "Project ID",  "order": 4 }
+    ]
+  },
+  "POLineItemTag": {
+    "title": "PO Line Item",
+    "fields": [
+      { "key": "PONum",       "caption": "PO Number",   "order": 1 },
+      { "key": "Item",        "caption": "Item Number", "order": 2 },
+      { "key": "Description", "caption": "Description", "order": 3 },
+      { "key": "Qty",         "caption": "Quantity",    "order": 4, "format": "{0:0.###}" },
+      { "key": "Units",       "caption": "Units",       "order": 5 },
+      { "key": "POItemId",    "caption": "PO Item ID",  "order": 6 }
+    ]
+  }
+}
