@@ -190,11 +190,30 @@ namespace IWCCadToolsV9.Core
             int projId  = picker.SelectedProjectId.Value;
             int? dashId = picker.SelectedDashId;
 
-            // Persist to DWG immediately so it survives a crash before BeforeSave
+            // Persist IDs immediately so the drawing is associated even if the
+            // user closes/crashes before the full data sync completes.
             DwgPropertyStore.WriteProjectIds(_doc, projId, dashId);
 
-            // Async load — fire-and-forget from UI thread is fine here because
-            // LoadProjectDataAsync only touches SQL, not the AutoCAD database
+            // IMPORTANT: Do not block the AutoCAD/WinForms UI thread here with
+            // LoadProjectDataAsync(...).GetAwaiter().GetResult(). The project
+            // selector already has the selected active project/dash records in
+            // memory. Use those records to write the full DWG properties
+            // immediately, then refresh the rest of the context in the
+            // background. This avoids the hang seen immediately after selecting
+            // the dash from the dialog.
+            if (picker.SelectedProject != null)
+            {
+                Project = picker.SelectedProject;
+                Dash = picker.SelectedDash;
+                IsOffline = false;
+
+                PersistToDwg();
+                RaiseProjectLoaded();
+            }
+
+            // Refresh the full project context asynchronously for subscribers
+            // that need lists such as Materials/Hardware/Dashes. This should not
+            // be required for the DWG custom property sync above.
             _ = LoadProjectDataAsync(projId, dashId);
         }
 

@@ -30,6 +30,12 @@ namespace IWCCadToolsV9.UI
         public int?  SelectedProjectId { get; private set; }
         public int?  SelectedDashId    { get; private set; }
 
+        /// <summary>Full selected project record from the already-loaded picker list.</summary>
+        public ProjectRecord? SelectedProject { get; private set; }
+
+        /// <summary>Full selected dash record from the already-loaded dash list.</summary>
+        public DashRecord? SelectedDash { get; private set; }
+
         // -----------------------------------------------------------------------
         // Private state
         // -----------------------------------------------------------------------
@@ -39,6 +45,7 @@ namespace IWCCadToolsV9.UI
         private List<ProjectRecord> _allProjects = new();
         private List<DashRecord>    _dashes      = new();
         private int?                _selectedProjId;
+        private ProjectRecord?     _selectedProject;
 
         // -----------------------------------------------------------------------
         // Construction
@@ -216,7 +223,9 @@ namespace IWCCadToolsV9.UI
         private void OnProjectSelected(object? sender, EventArgs e)
         {
             if (lstProjects.SelectedItem is not ListItem<ProjectRecord> item) return;
+            _selectedProject = item.Value;
             _selectedProjId = item.Value.Id;
+            SelectedDash = null;
             _ = LoadDashesAsync(item.Value.Id);
         }
 
@@ -224,6 +233,8 @@ namespace IWCCadToolsV9.UI
         {
             if (_selectedProjId == null) return;
             SelectedProjectId = _selectedProjId;
+            SelectedProject = _selectedProject;
+            SelectedDash = null;
 
             // If a dash row is selected, use it; otherwise accept project only
             if (dgvDashes.CurrentRow?.DataBoundItem != null)
@@ -232,6 +243,8 @@ namespace IWCCadToolsV9.UI
                     .GetType().GetProperty("DashId")
                     ?.GetValue(dgvDashes.CurrentRow.DataBoundItem);
                 SelectedDashId = dashId > 0 ? dashId : null;
+                if (SelectedDashId.HasValue)
+                    SelectedDash = _dashes.FirstOrDefault(d => d.DashId == SelectedDashId.Value);
             }
 
             DialogResult = DialogResult.OK;
@@ -241,7 +254,9 @@ namespace IWCCadToolsV9.UI
         {
             if (_selectedProjId == null) return;
             SelectedProjectId = _selectedProjId;
+            SelectedProject   = _selectedProject;
             SelectedDashId    = null;
+            SelectedDash      = null;
             DialogResult      = DialogResult.OK;
         }
 
