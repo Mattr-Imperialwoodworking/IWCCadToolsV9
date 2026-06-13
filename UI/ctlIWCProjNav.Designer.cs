@@ -6,7 +6,7 @@
 
         private System.Windows.Forms.SplitContainer split;
         private System.Windows.Forms.TreeView tree;
-        private System.Windows.Forms.WebBrowser detailBrowser;
+        private Microsoft.Web.WebView2.WinForms.WebView2 detailBrowser;
         private System.Windows.Forms.ImageList images;
 
         protected override void Dispose(bool disposing)
@@ -18,6 +18,7 @@
                     _currentNavSvc.ProjectLoaded -= OnProjectChanged;
                 components?.Dispose();
                 images?.Dispose();
+                detailBrowser?.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -28,7 +29,7 @@
             split = new SplitContainer();
             tree = new TreeView();
             images = new ImageList(components);
-            detailBrowser = new WebBrowser();
+            detailBrowser = new Microsoft.Web.WebView2.WinForms.WebView2();
             ((System.ComponentModel.ISupportInitialize)split).BeginInit();
             split.Panel1.SuspendLayout();
             split.Panel2.SuspendLayout();
@@ -78,9 +79,9 @@
             detailBrowser.Dock = DockStyle.Fill;
             detailBrowser.Location = new Point(0, 0);
             detailBrowser.Name = "detailBrowser";
-            detailBrowser.ScriptErrorsSuppressed = true;
             detailBrowser.Size = new Size(806, 650);
             detailBrowser.TabIndex = 0;
+            detailBrowser.DefaultBackgroundColor = Color.White;
             // 
             // ctlIWCProjNav
             // 

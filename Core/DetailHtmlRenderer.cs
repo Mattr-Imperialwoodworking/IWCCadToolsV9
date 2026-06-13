@@ -40,6 +40,13 @@ namespace IWCCadToolsV9.Core
             table.detail td.value { color: #111; }
             table.detail td.value img { max-width: 100%; height: auto; border: 1px solid #ccc; }
             table.detail td.value a { color: #2a5d8f; }
+            table.detail td.separator { padding: 2px 0; border-bottom: none; }
+            table.detail td.separator hr { border: none; border-top: 1px solid #ccc; margin: 6px 0; }
+            table.detail td.section-heading {
+                font-weight: 700; color: #2a5d8f; padding-top: 14px; border-bottom: none; font-size: 13px;
+            }
+            table.detail td.section-heading.collapsible { cursor: pointer; user-select: none; }
+            table.detail td.section-heading .section-arrow { display: inline-block; width: 1em; color: #2a5d8f; }
             .empty-value { color: #999; font-style: italic; }
             .info-message { color: #555; font-style: italic; padding: 10px; }
         ";
@@ -48,7 +55,7 @@ namespace IWCCadToolsV9.Core
         {
             public string Key { get; set; } = "";
             public string Caption { get; set; } = "";
-            public int Order { get; set; }
+            public double Order { get; set; }
             public string? Format { get; set; }
 
             /// <summary>
@@ -74,6 +81,24 @@ namespace IWCCadToolsV9.Core
             /// For Type == "image": optional max width in pixels (CSS max-width).
             /// </summary>
             public int? MaxWidth { get; set; }
+
+            /// <summary>
+            /// For Type == "image": optional max height in pixels (CSS max-height).
+            /// </summary>
+            public int? MaxHeight { get; set; }
+
+            /// <summary>
+            /// For Type == "heading": if true, this section's rows (everything until
+            /// the next heading/separator, or end of table) can be toggled open/closed
+            /// by clicking the heading.
+            /// </summary>
+            public bool Collapsible { get; set; }
+
+            /// <summary>
+            /// For Type == "heading" with Collapsible == true: if true, the section
+            /// starts collapsed.
+            /// </summary>
+            public bool Collapsed { get; set; }
         }
 
         /// <summary>
@@ -158,12 +183,15 @@ namespace IWCCadToolsV9.Core
                             {
                                 Key = f.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "",
                                 Caption = f.TryGetProperty("caption", out var c) ? c.GetString() ?? "" : "",
-                                Order = f.TryGetProperty("order", out var o) ? o.GetInt32() : 0,
+                                Order = f.TryGetProperty("order", out var o) ? o.GetDouble() : 0,
                                 Format = f.TryGetProperty("format", out var fmt) ? fmt.GetString() : null,
                                 Type = f.TryGetProperty("type", out var ty) ? (ty.GetString() ?? "text") : "text",
                                 LinkText = f.TryGetProperty("linkText", out var lt) ? lt.GetString() : null,
                                 ImageMimeType = f.TryGetProperty("imageMimeType", out var mt) ? mt.GetString() : null,
-                                MaxWidth = f.TryGetProperty("maxWidth", out var mw) ? mw.GetInt32() : (int?)null
+                                MaxWidth = f.TryGetProperty("maxWidth", out var mw) ? mw.GetInt32() : (int?)null,
+                                MaxHeight = f.TryGetProperty("maxHeight", out var mh) ? mh.GetInt32() : (int?)null,
+                                Collapsible = f.TryGetProperty("collapsible", out var cl) && cl.GetBoolean(),
+                                Collapsed = f.TryGetProperty("collapsed", out var co) && co.GetBoolean()
                             });
                         }
                         typeDef.Fields = typeDef.Fields.OrderBy(x => x.Order).ToList();
@@ -321,8 +349,59 @@ namespace IWCCadToolsV9.Core
             sb.Append("<h2>").Append(WebUtility.HtmlEncode(title)).Append("</h2>");
             sb.Append("<table class=\"detail\">");
 
+            bool inCollapsibleSection = false;
+            int sectionIndex = 0;
+
             foreach (var f in fields)
             {
+                string type = (f.Type ?? "text").ToLowerInvariant();
+
+                if (type == "separator" || type == "divider")
+                {
+                    if (inCollapsibleSection) { sb.Append("</tbody>"); inCollapsibleSection = false; }
+                    sb.Append("<tr><td colspan=\"2\" class=\"separator\"><hr/></td></tr>");
+                    continue;
+                }
+
+                if (type == "heading")
+                {
+                    if (inCollapsibleSection) { sb.Append("</tbody>"); inCollapsibleSection = false; }
+
+                    string headingText = ExpandTitle(f.Caption, values, f.Caption);
+
+                    if (f.Collapsible)
+                    {
+                        sectionIndex++;
+                        string sectionId = $"detail-section-{sectionIndex}";
+                        string startClass = f.Collapsed ? " collapsed" : "";
+
+                        sb.Append("<tr><td colspan=\"2\" class=\"section-heading collapsible")
+                          .Append(startClass)
+                          .Append("\" onclick=\"var b=document.getElementById('")
+                          .Append(sectionId)
+                          .Append("');var a=document.getElementById('")
+                          .Append(sectionId)
+                          .Append("-arrow');if(b.style.display=='none'){b.style.display='';a.innerHTML='&#9662;';}else{b.style.display='none';a.innerHTML='&#9656;';}\">")
+                          .Append("<span id=\"").Append(sectionId).Append("-arrow\" class=\"section-arrow\">")
+                          .Append(f.Collapsed ? "&#9656;" : "&#9662;")
+                          .Append("</span> ")
+                          .Append(WebUtility.HtmlEncode(headingText))
+                          .Append("</td></tr>");
+
+                        sb.Append("<tbody id=\"").Append(sectionId).Append("\"")
+                          .Append(f.Collapsed ? " style=\"display:none;\"" : "")
+                          .Append(">");
+                        inCollapsibleSection = true;
+                    }
+                    else
+                    {
+                        sb.Append("<tr><td colspan=\"2\" class=\"section-heading\">")
+                          .Append(WebUtility.HtmlEncode(headingText))
+                          .Append("</td></tr>");
+                    }
+                    continue;
+                }
+
                 if (string.IsNullOrEmpty(f.Key) || !values.TryGetValue(f.Key, out var rawValue))
                     continue;
 
@@ -335,6 +414,8 @@ namespace IWCCadToolsV9.Core
                 sb.Append(cellHtml);
                 sb.Append("</td></tr>");
             }
+
+            if (inCollapsibleSection) sb.Append("</tbody>");
 
             sb.Append("</table></body></html>");
             return sb.ToString();
@@ -369,7 +450,11 @@ namespace IWCCadToolsV9.Core
                     isEmpty = string.IsNullOrEmpty(src);
                     if (isEmpty) return "(none)";
 
-                    string style = f.MaxWidth.HasValue ? $" style=\"max-width:{f.MaxWidth.Value}px;\"" : "";
+                    var styleParts = new List<string>();
+                    if (f.MaxWidth.HasValue) styleParts.Add($"max-width:{f.MaxWidth.Value}px;");
+                    if (f.MaxHeight.HasValue) styleParts.Add($"max-height:{f.MaxHeight.Value}px;");
+                    string style = styleParts.Count > 0 ? $" style=\"{string.Concat(styleParts)}\"" : "";
+
                     return $"<img src=\"{WebUtility.HtmlEncode(src!)}\"{style} />";
                 }
 

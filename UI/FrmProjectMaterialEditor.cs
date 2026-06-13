@@ -29,6 +29,16 @@ namespace IWCCadToolsV9.UI
         public string  MatUnits     => txtMatUnits.Text.Trim();
         public string  MatNotes     => txtMatNotes.Text;
         public DateTime? MatApprove => chkApproved.Checked ? dtpApprove.Value.Date : null;
+        public string  MatApproveSubmitNum => txtMatApproveSubmitNum.Text.Trim();
+
+        // Wood Species & Finish
+        public string  WdSpecies    => txtWdSpecies.Text.Trim();
+        public string  WdCut        => txtWdCut.Text.Trim();
+        public string  WdMatch      => txtWdMatch.Text.Trim();
+        public string  FinishType   => txtFinishType.Text.Trim();
+        public string  FinishPore   => txtFinishPore.Text.Trim();
+        public string  FinishSheen  => txtFinishSheen.Text.Trim();
+        public string  FinishNotes  => txtFinishNotes.Text;
 
         // -----------------------------------------------------------------------
         // State
@@ -125,11 +135,21 @@ namespace IWCCadToolsV9.UI
                     chkApproved.Checked  = true;
                     dtpApprove.Value     = record.MatApprove.Value;
                 }
+                txtMatApproveSubmitNum.Text = record.MatApproveSubmitNum ?? string.Empty;
+
+                txtWdSpecies.Text   = record.WdSpecies   ?? string.Empty;
+                txtWdCut.Text       = record.WdCut       ?? string.Empty;
+                txtWdMatch.Text     = record.WdMatch     ?? string.Empty;
+                txtFinishType.Text  = record.FinishType  ?? string.Empty;
+                txtFinishPore.Text  = record.FinishPore  ?? string.Empty;
+                txtFinishSheen.Text = record.FinishSheen ?? string.Empty;
+                txtFinishNotes.Text = record.FinishNotes ?? string.Empty;
 
                 if (record.ImageBytes != null && record.ImageBytes.Length > 0)
                 {
                     _imageBytes = record.ImageBytes;
                     ShowImageBytes(_imageBytes);
+                    btnSaveImage.Enabled = true;
                 }
             }
 
@@ -154,7 +174,10 @@ namespace IWCCadToolsV9.UI
             if (loadRecord && itemId > 0)
             {
                 using var cmd2 = new SqlCommand(@"
-                    SELECT MatNo, MatDesc, MatGroup, MatUnits, MatNotes, MatApprove, Mat_Image
+                    SELECT MatNo, MatDesc, MatGroup, MatUnits, MatNotes, MatApprove, MatApproveSubmitNum,
+                           WdSpecies, WdCut, WdMatch,
+                           FinishType, FinishPore, FinishSheen, FinishNotes,
+                           Mat_Image
                     FROM   dbo.Proj_Mat
                     WHERE  ID = @id;", conn);
                 cmd2.Parameters.AddWithValue("@id", itemId);
@@ -169,6 +192,14 @@ namespace IWCCadToolsV9.UI
                         MatUnits   = rdr2["MatUnits"]   as string,
                         MatNotes   = rdr2["MatNotes"]   as string,
                         MatApprove = rdr2["MatApprove"] is DateTime dt ? dt              : null,
+                        MatApproveSubmitNum = rdr2["MatApproveSubmitNum"] as string,
+                        WdSpecies   = rdr2["WdSpecies"]   as string,
+                        WdCut       = rdr2["WdCut"]       as string,
+                        WdMatch     = rdr2["WdMatch"]     as string,
+                        FinishType  = rdr2["FinishType"]  as string,
+                        FinishPore  = rdr2["FinishPore"]  as string,
+                        FinishSheen = rdr2["FinishSheen"] as string,
+                        FinishNotes = rdr2["FinishNotes"] as string,
                         ImageBytes = rdr2["Mat_Image"]  as byte[],
                     };
                 }
@@ -187,7 +218,63 @@ namespace IWCCadToolsV9.UI
             btnCancel.Click  += (_, _) => DialogResult = DialogResult.Cancel;
             chkApproved.CheckedChanged += (_, _) => dtpApprove.Enabled = chkApproved.Checked;
             btnBrowseImage.Click += BtnBrowseImage_Click;
-            btnClearImage.Click  += (_, _) => { _imageBytes = null; pictImage.Image = null; };
+            btnClearImage.Click  += (_, _) => { _imageBytes = null; pictImage.Image = null; btnSaveImage.Enabled = false; };
+            btnSaveImage.Click   += BtnSaveImage_Click;
+        }
+
+        private void BtnSaveImage_Click(object? sender, EventArgs e)
+        {
+            if (_imageBytes == null || _imageBytes.Length == 0)
+            {
+                MessageBox.Show("No image is saved for this material.", "Save Image",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string ext = DetectImageExtension(_imageBytes);
+            string defaultName = string.IsNullOrWhiteSpace(txtMatNo.Text)
+                ? $"MaterialImage{ext}"
+                : $"{txtMatNo.Text.Trim()}{ext}";
+
+            using var sfd = new SaveFileDialog
+            {
+                Title    = "Save Material Image",
+                FileName = defaultName,
+                Filter   = "Image Files|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff|All Files|*.*"
+            };
+            if (sfd.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                File.WriteAllBytes(sfd.FileName, _imageBytes);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Could not save image:\n{ex.Message}", "Save Image",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// Sniffs common image file signatures to pick a reasonable file extension
+        /// when saving raw bytes from a SQL "image" column (which carries no
+        /// filename/extension of its own).
+        /// </summary>
+        private static string DetectImageExtension(byte[] bytes)
+        {
+            if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+                return ".png";
+            if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+                return ".jpg";
+            if (bytes.Length >= 6 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F')
+                return ".gif";
+            if (bytes.Length >= 2 && bytes[0] == 'B' && bytes[1] == 'M')
+                return ".bmp";
+            if (bytes.Length >= 4 && bytes[0] == 'I' && bytes[1] == 'I' && bytes[2] == '*')
+                return ".tiff"; // little-endian TIFF
+            if (bytes.Length >= 4 && bytes[0] == 'M' && bytes[1] == 'M' && bytes[2] == 0 && bytes[3] == '*')
+                return ".tiff"; // big-endian TIFF
+            return ".png";
         }
 
         private void BtnBrowseImage_Click(object? sender, EventArgs e)
@@ -203,6 +290,7 @@ namespace IWCCadToolsV9.UI
             {
                 _imageBytes = File.ReadAllBytes(ofd.FileName);
                 ShowImageBytes(_imageBytes);
+                btnSaveImage.Enabled = true;
             }
             catch (Exception ex)
             {
@@ -256,6 +344,14 @@ namespace IWCCadToolsV9.UI
                     MatUnits   = txtMatUnits.Text.Trim(),
                     MatNotes   = txtMatNotes.Text.Length == 0 ? null : txtMatNotes.Text,
                     MatApprove = chkApproved.Checked ? dtpApprove.Value.Date : null,
+                    MatApproveSubmitNum = txtMatApproveSubmitNum.Text.Trim(),
+                    WdSpecies   = txtWdSpecies.Text.Trim(),
+                    WdCut       = txtWdCut.Text.Trim(),
+                    WdMatch     = txtWdMatch.Text.Trim(),
+                    FinishType  = txtFinishType.Text.Trim(),
+                    FinishPore  = txtFinishPore.Text.Trim(),
+                    FinishSheen = txtFinishSheen.Text.Trim(),
+                    FinishNotes = txtFinishNotes.Text.Length == 0 ? null : txtFinishNotes.Text,
                     ImageBytes = _imageBytes,
                 };
 
@@ -280,11 +376,17 @@ namespace IWCCadToolsV9.UI
             using var cmd = new SqlCommand(@"
                 INSERT INTO dbo.Proj_Mat
                     (Proj_ID, MatNo, MatDesc, MatGroup, MatUnits,
-                     MatNotes, MatApprove, Mat_Image, ItemUpdate)
+                     MatNotes, MatApprove, MatApproveSubmitNum,
+                     WdSpecies, WdCut, WdMatch,
+                     FinishType, FinishPore, FinishSheen, FinishNotes,
+                     Mat_Image, ItemUpdate)
                 OUTPUT INSERTED.ID
                 VALUES
                     (@pid, @no, @desc, @grp, @units,
-                     @notes, @approve, @img, CAST(GETDATE() AS date));", conn);
+                     @notes, @approve, @approveSubmitNum,
+                     @wdSpecies, @wdCut, @wdMatch,
+                     @finishType, @finishPore, @finishSheen, @finishNotes,
+                     @img, CAST(GETDATE() AS date));", conn);
 
             cmd.Parameters.AddWithValue("@pid",    projectId);
             cmd.Parameters.AddWithValue("@no",     Nv(a.MatNo));
@@ -293,6 +395,14 @@ namespace IWCCadToolsV9.UI
             cmd.Parameters.AddWithValue("@units",  Nv(a.MatUnits));
             cmd.Parameters.AddWithValue("@notes",  Nv(a.MatNotes));
             cmd.Parameters.AddWithValue("@approve",a.MatApprove.HasValue ? (object)a.MatApprove.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@approveSubmitNum", Nv(a.MatApproveSubmitNum));
+            cmd.Parameters.AddWithValue("@wdSpecies",   Nv(a.WdSpecies));
+            cmd.Parameters.AddWithValue("@wdCut",       Nv(a.WdCut));
+            cmd.Parameters.AddWithValue("@wdMatch",     Nv(a.WdMatch));
+            cmd.Parameters.AddWithValue("@finishType",  Nv(a.FinishType));
+            cmd.Parameters.AddWithValue("@finishPore",  Nv(a.FinishPore));
+            cmd.Parameters.AddWithValue("@finishSheen", Nv(a.FinishSheen));
+            cmd.Parameters.AddWithValue("@finishNotes", Nv(a.FinishNotes));
             cmd.Parameters.Add("@img", System.Data.SqlDbType.Image).Value = (object?)a.ImageBytes ?? DBNull.Value;
 
             return Convert.ToInt32(cmd.ExecuteScalar());
@@ -310,6 +420,14 @@ namespace IWCCadToolsV9.UI
                     MatUnits   = @units,
                     MatNotes   = @notes,
                     MatApprove = @approve,
+                    MatApproveSubmitNum = @approveSubmitNum,
+                    WdSpecies   = @wdSpecies,
+                    WdCut       = @wdCut,
+                    WdMatch     = @wdMatch,
+                    FinishType  = @finishType,
+                    FinishPore  = @finishPore,
+                    FinishSheen = @finishSheen,
+                    FinishNotes = @finishNotes,
                     Mat_Image  = @img,
                     ItemUpdate = CAST(GETDATE() AS date)
                 WHERE ID = @id;", conn);
@@ -321,6 +439,14 @@ namespace IWCCadToolsV9.UI
             cmd.Parameters.AddWithValue("@units",  Nv(a.MatUnits));
             cmd.Parameters.AddWithValue("@notes",  Nv(a.MatNotes));
             cmd.Parameters.AddWithValue("@approve",a.MatApprove.HasValue ? (object)a.MatApprove.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@approveSubmitNum", Nv(a.MatApproveSubmitNum));
+            cmd.Parameters.AddWithValue("@wdSpecies",   Nv(a.WdSpecies));
+            cmd.Parameters.AddWithValue("@wdCut",       Nv(a.WdCut));
+            cmd.Parameters.AddWithValue("@wdMatch",     Nv(a.WdMatch));
+            cmd.Parameters.AddWithValue("@finishType",  Nv(a.FinishType));
+            cmd.Parameters.AddWithValue("@finishPore",  Nv(a.FinishPore));
+            cmd.Parameters.AddWithValue("@finishSheen", Nv(a.FinishSheen));
+            cmd.Parameters.AddWithValue("@finishNotes", Nv(a.FinishNotes));
             cmd.Parameters.Add("@img", System.Data.SqlDbType.Image).Value = (object?)a.ImageBytes ?? DBNull.Value;
             cmd.ExecuteNonQuery();
         }
@@ -368,6 +494,21 @@ namespace IWCCadToolsV9.UI
             };
             btnBrowseImage = new Button { Text = "Browse Image…", AutoSize = true };
             btnClearImage  = new Button { Text = "Clear",         AutoSize = true };
+            btnSaveImage   = new Button { Text = "Save Image As…", AutoSize = true, Enabled = false };
+
+            txtMatApproveSubmitNum = new TextBox { Dock = DockStyle.Fill };
+
+            txtWdSpecies   = new TextBox { Dock = DockStyle.Fill };
+            txtWdCut       = new TextBox { Dock = DockStyle.Fill };
+            txtWdMatch     = new TextBox { Dock = DockStyle.Fill };
+            txtFinishType  = new TextBox { Dock = DockStyle.Fill };
+            txtFinishPore  = new TextBox { Dock = DockStyle.Fill };
+            txtFinishSheen = new TextBox { Dock = DockStyle.Fill };
+            txtFinishNotes = new TextBox
+            {
+                Dock = DockStyle.Fill, Multiline = true,
+                ScrollBars = ScrollBars.Vertical, AcceptsReturn = true
+            };
 
             btnSave   = new Button { Text = "Save",   Width = 88, Height = 28, Enabled = false };
             btnCancel = new Button { Text = "Cancel", Width = 88, Height = 28 };
@@ -406,7 +547,7 @@ namespace IWCCadToolsV9.UI
             var tabDetails = new TabPage("Details");
             var tblDet = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4,
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5,
                 Padding = new Padding(10, 10, 10, 4)
             };
             tblDet.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
@@ -414,6 +555,7 @@ namespace IWCCadToolsV9.UI
             tblDet.RowStyles.Add(new RowStyle(SizeType.Percent,  40));   // Notes
             tblDet.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Approved checkbox
             tblDet.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Approval date
+            tblDet.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Approval submittal number
             tblDet.RowStyles.Add(new RowStyle(SizeType.Percent,  60));   // Image
 
             tblDet.Controls.Add(new Label
@@ -435,13 +577,21 @@ namespace IWCCadToolsV9.UI
             }, 0, 2);
             tblDet.Controls.Add(dtpApprove, 1, 2);
 
+            tblDet.Controls.Add(new Label
+            {
+                Text = "Submittal #:", AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 8, 6, 0)
+            }, 0, 3);
+            tblDet.Controls.Add(txtMatApproveSubmitNum, 1, 3);
+
             // Image row: label + picture + buttons stacked
             tblDet.Controls.Add(new Label
             {
                 Text = "Image:", AutoSize = true,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 Margin = new Padding(0, 6, 6, 0)
-            }, 0, 3);
+            }, 0, 4);
 
             var imgPanel = new TableLayoutPanel
             {
@@ -457,17 +607,62 @@ namespace IWCCadToolsV9.UI
             };
             imgBtnRow.Controls.Add(btnBrowseImage);
             imgBtnRow.Controls.Add(btnClearImage);
+            imgBtnRow.Controls.Add(btnSaveImage);
 
             imgPanel.Controls.Add(pictImage,   0, 0);
             imgPanel.Controls.Add(imgBtnRow,   0, 1);
-            tblDet.Controls.Add(imgPanel, 1, 3);
+            tblDet.Controls.Add(imgPanel, 1, 4);
 
             tabDetails.Controls.Add(tblDet);
+
+            // ---- Tab: Wood Species & Finish ---------------------------------------
+            var tabWoodFinish = new TabPage("Wood Species & Finish");
+            var tblWood = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7,
+                Padding = new Padding(10, 10, 10, 4)
+            };
+            tblWood.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            tblWood.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Species
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Cut
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Matching
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Finish Type
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Finish Pore
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));   // Finish Sheen
+            tblWood.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // Finish Notes
+
+            void AddWood(int row, string lbl, Control ctl)
+            {
+                tblWood.Controls.Add(new Label
+                {
+                    Text = lbl, AutoSize = true,
+                    Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                    Margin = new Padding(0, 8, 6, 0)
+                }, 0, row);
+                tblWood.Controls.Add(ctl, 1, row);
+            }
+            AddWood(0, "Species:",      txtWdSpecies);
+            AddWood(1, "Cut:",          txtWdCut);
+            AddWood(2, "Matching:",     txtWdMatch);
+            AddWood(3, "Finish Type:",  txtFinishType);
+            AddWood(4, "Finish Pore:",  txtFinishPore);
+            AddWood(5, "Finish Sheen:", txtFinishSheen);
+            tblWood.Controls.Add(new Label
+            {
+                Text = "Finish Notes:", AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, 6, 6, 0)
+            }, 0, 6);
+            tblWood.Controls.Add(txtFinishNotes, 1, 6);
+
+            tabWoodFinish.Controls.Add(tblWood);
 
             // ---- TabControl ------------------------------------------------------
             tabControl = new TabControl { Dock = DockStyle.Fill };
             tabControl.TabPages.Add(tabBasic);
             tabControl.TabPages.Add(tabDetails);
+            tabControl.TabPages.Add(tabWoodFinish);
 
             // ---- Button strip ----------------------------------------------------
             var btnPanel = new FlowLayoutPanel
@@ -504,9 +699,18 @@ namespace IWCCadToolsV9.UI
         private TextBox      txtMatNotes    = null!;
         private CheckBox     chkApproved    = null!;
         private DateTimePicker dtpApprove   = null!;
+        private TextBox      txtMatApproveSubmitNum = null!;
+        private TextBox      txtWdSpecies   = null!;
+        private TextBox      txtWdCut       = null!;
+        private TextBox      txtWdMatch     = null!;
+        private TextBox      txtFinishType  = null!;
+        private TextBox      txtFinishPore  = null!;
+        private TextBox      txtFinishSheen = null!;
+        private TextBox      txtFinishNotes = null!;
         private PictureBox   pictImage      = null!;
         private Button       btnBrowseImage = null!;
         private Button       btnClearImage  = null!;
+        private Button       btnSaveImage   = null!;
         private Button       btnSave        = null!;
         private Button       btnCancel      = null!;
 
@@ -530,6 +734,14 @@ namespace IWCCadToolsV9.UI
             public string?   MatUnits   { get; init; }
             public string?   MatNotes   { get; init; }
             public DateTime? MatApprove { get; init; }
+            public string?   MatApproveSubmitNum { get; init; }
+            public string?   WdSpecies   { get; init; }
+            public string?   WdCut       { get; init; }
+            public string?   WdMatch     { get; init; }
+            public string?   FinishType  { get; init; }
+            public string?   FinishPore  { get; init; }
+            public string?   FinishSheen { get; init; }
+            public string?   FinishNotes { get; init; }
             public byte[]?   ImageBytes { get; init; }
         }
 
@@ -541,6 +753,14 @@ namespace IWCCadToolsV9.UI
             public string?   MatUnits   { get; init; }
             public string?   MatNotes   { get; init; }
             public DateTime? MatApprove { get; init; }
+            public string?   MatApproveSubmitNum { get; init; }
+            public string?   WdSpecies   { get; init; }
+            public string?   WdCut       { get; init; }
+            public string?   WdMatch     { get; init; }
+            public string?   FinishType  { get; init; }
+            public string?   FinishPore  { get; init; }
+            public string?   FinishSheen { get; init; }
+            public string?   FinishNotes { get; init; }
             public byte[]?   ImageBytes { get; init; }
         }
     }

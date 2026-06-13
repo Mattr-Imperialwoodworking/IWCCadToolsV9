@@ -121,3 +121,8 @@ C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debu
 C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debug\net8.0-windows\win-x64\IWCCadToolsV9.UI.FrmProjectSelector.resources
 C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\obj\x64\Debug\net8.0-windows\win-x64\IWCCadToolsV9.UI.ProjSelect.resources
 C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\Resources\DetailFieldMap.json
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\runtimes\win-x64\native\WebView2Loader.dll
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\Microsoft.Web.WebView2.Core.dll
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\Microsoft.Web.WebView2.WinForms.dll
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\Microsoft.Web.WebView2.Wpf.dll
+C:\Users\mattr\source\repos\Mattr-Imperialwoodworking\IWCCadToolsV9\bin\x64\Debug\net8.0-windows\win-x64\WebView2Loader.dll

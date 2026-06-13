@@ -2,33 +2,81 @@
   "ProjectTag": {
     "title": "Project",
     "fields": [
-      { "key": "ProjectNum",  "caption": "Project Number", "order": 1 },
-      { "key": "ProjectName", "caption": "Project Name",   "order": 2 },
-      { "key": "ProjectId",   "caption": "Project ID",     "order": 3 }
+      {
+        "key": "ProjectNum",
+        "caption": "Project Number",
+        "order": 1
+      },
+      {
+        "key": "ProjectName",
+        "caption": "Project Name",
+        "order": 2
+      },
+      {
+        "key": "ProjectId",
+        "caption": "Project ID",
+        "order": 3
+      }
     ]
   },
   "ChildTag": {
     "title": "{ChildLabel}",
     "fields": [
-      { "key": "ChildLabel", "caption": "Section",    "order": 1 },
-      { "key": "ProjectId",  "caption": "Project ID", "order": 2 }
+      {
+        "key": "ChildLabel",
+        "caption": "Section",
+        "order": 1
+      },
+      {
+        "key": "ProjectId",
+        "caption": "Project ID",
+        "order": 2
+      }
     ]
   },
   "DashSectionTag": {
     "title": "{Section}",
     "fields": [
-      { "key": "Section",      "caption": "Section",       "order": 1 },
-      { "key": "SeriesDashId", "caption": "Dash ID",       "order": 2 },
-      { "key": "ProjectId",    "caption": "Project ID",    "order": 3 }
+      {
+        "key": "Section",
+        "caption": "Section",
+        "order": 1
+      },
+      {
+        "key": "SeriesDashId",
+        "caption": "Dash ID",
+        "order": 2
+      },
+      {
+        "key": "ProjectId",
+        "caption": "Project ID",
+        "order": 3
+      }
     ]
   },
   "DashTag": {
     "title": "Dash {DashNumDisplay}",
     "fields": [
-      { "key": "DashNumDisplay", "caption": "Dash Number",  "order": 1 },
-      { "key": "DashDesc",       "caption": "Description",  "order": 2 },
-      { "key": "DashId",         "caption": "Dash ID",      "order": 3 },
-      { "key": "ProjectId",      "caption": "Project ID",   "order": 4 }
+      {
+        "key": "DashNumDisplay",
+        "caption": "Dash Number",
+        "order": 1
+      },
+      {
+        "key": "DashDesc",
+        "caption": "Description",
+        "order": 2
+      },
+      {
+        "key": "DashId",
+        "caption": "Dash ID",
+        "order": 3
+      },
+      {
+        "key": "ProjectId",
+        "caption": "Project ID",
+        "order": 4
+      }
     ]
   },
   "HdwItemTag": {
@@ -39,32 +87,173 @@
       "keyField": "ItemId"
     },
     "fields": [
-      { "key": "HdwNo",   "caption": "Hardware Number", "order": 1 },
-      { "key": "HdwDesc", "caption": "Description",     "order": 2 },
-      { "key": "TotalDashQty", "caption": "Total Qty Used (All Dashes)", "order": 3, "format": "{0:N0}" },
+      {
+        "key": "HdwNo",
+        "caption": "Hardware Number",
+        "order": 1
+      },
+      {
+        "key": "HdwDesc",
+        "caption": "Description",
+        "order": 2
+      },
+      {
+        "key": "TotalDashQty",
+        "caption": "Total Qty Used (All Dashes)",
+        "order": 3,
+        "format": "{0:N0}"
+      },
 
-      { "key": "HdwMfr",  "caption": "Manufacturer",    "order": 10 },
-      { "key": "HdwCost", "caption": "Unit Cost",       "order": 11, "format": "{0:C}" },
+      {
+        "key": "HdwVendorNum",
+        "caption": "Vendor Part Number",
+        "order": 10
+      },
+      {
+        "key": "HdwVendorlink",
+        "caption": "Vendor Link",
+        "order": 11,
+        "type": "link",
+        "linkText": "Open Vendor Page"
+      },
+      {
+        "key": "HdwNotes",
+        "caption": "Notes",
+        "order": 12
+      },
+      {
+        "key": "HdwImage",
+        "caption": "Image",
+        "order": 13,
+        "type": "image",
+        "imageMimeType": "image/png",
+        "maxWidth": 300
+      },
 
-      { "key": "GroupId", "caption": "Group ID",        "order": 90 },
-      { "key": "ItemId",  "caption": "Item ID",         "order": 91 }
+      {
+        "key": "GroupId",
+        "caption": "Group ID",
+        "order": 90
+      },
+      {
+        "key": "ItemId",
+        "caption": "Item ID",
+        "order": 91
+      }
     ]
   },
   "HdwGroupTag": {
     "title": "Hardware Group",
     "fields": [
-      { "key": "GroupTag",  "caption": "Group Tag",  "order": 1 },
-      { "key": "GroupName", "caption": "Group Name", "order": 2 },
-      { "key": "GroupId",   "caption": "Group ID",   "order": 3 }
+      {
+        "key": "GroupTag",
+        "caption": "Group Tag",
+        "order": 1
+      },
+      {
+        "key": "GroupName",
+        "caption": "Group Name",
+        "order": 2
+      },
+      {
+        "key": "GroupId",
+        "caption": "Group ID",
+        "order": 3
+      }
     ]
   },
   "MatItemTag": {
     "title": "Material Item",
+    "query": {
+      "table": "dbo.Proj_MatCompile",
+      "keyColumn": "ID",
+      "keyField": "ItemId"
+    },
     "fields": [
-      { "key": "MatNo",   "caption": "Material Number", "order": 1 },
-      { "key": "MatDesc", "caption": "Description",     "order": 2 },
-      { "key": "GroupId", "caption": "Group ID",        "order": 3 },
-      { "key": "ItemId",  "caption": "Item ID",         "order": 4 }
+      {
+        "key": "MatNo",
+        "caption": "Material Number",
+        "order": 1
+      },
+      {
+        "key": "MatDesc",
+        "caption": "Description",
+        "order": 2
+      },
+      {
+        "key": "MatApprove",
+        "caption": "Approval",
+        "order": 3
+      },
+      {
+        "key": "MatUnits",
+        "caption": "Units",
+        "order": 4
+      },
+      {
+        "key": "MatNotes",
+        "caption": "Notes",
+        "order": 5
+      },
+
+      {
+        "type": "separator",
+        "order": 10
+      },
+
+      {
+        "type": "heading",
+        "caption": "Wood and Veneer Details",
+        "collapsible": true,
+        "collapsed": true,
+        "order": 11
+      },
+      {
+        "key": "WdSpecies",
+        "caption": "Species",
+        "order": 12
+      },
+      {
+        "key": "WdCut",
+        "caption": "Cut",
+        "order": 13
+      },
+      {
+        "key": "WdMatch",
+        "caption": "Match",
+        "order": 14
+      },
+      {
+        "key": "Mat_Image",
+        "caption": "Image",
+        "order": 15,
+        "type": "image",
+        "imageMimeType": "image/png",
+        "maxWidth": 200,
+        "maxHeight": 200
+      },
+
+      {
+        "type": "separator",
+        "order": 88
+      },
+      {
+        "type": "heading",
+        "caption": "Code Stuff",
+        "order": 89,
+        "collapsible": true,
+        "collapsed": true
+      },
+      {
+        "key": "GroupId",
+        "caption": "Group ID",
+        "order": 90
+      },
+      {
+        "key": "ItemId",
+        "caption": "Item ID",
+        "order": 91
+      }
     ]
   },
   "MatGroupTag": {

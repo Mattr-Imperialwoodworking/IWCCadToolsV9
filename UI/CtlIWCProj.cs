@@ -2432,18 +2432,18 @@ namespace IWCCadToolsV9.UI
             txtDashNotes.Text = SafeDbString(rdr, "Dash_Notes");
             txtShopNotes.Text = SafeDbString(rdr, "Shop_Notes");
 
-            txtDateTargetSubmit.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetSubmit"));
-            txtDateActualSubmit.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualSubmit"));
-            txtDateTargetApprove.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetApprove"));
-            txtDateActualApprove.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualApprove"));
-            txtDateTargetFD.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Target_FD"));
-            txtDateActualFD.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Actual_FD"));
-            txtDateTargetRlsMfr.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetRLSMfr"));
-            txtDateActualRlsMfr.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualRlsMfr"));
-            txtDateTargetFieldReady.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Target_FieldReady"));
-            txtDateActualFieldReady.Text = FormatDate(SafeDbDateOnly(rdr, "Date_Actual_FieldReady"));
-            txtDateTargetShip.Text = FormatDate(SafeDbDateOnly(rdr, "Date_TargetShip"));
-            txtDateActualShip.Text = FormatDate(SafeDbDateOnly(rdr, "Date_ActualShip"));
+            SetSchedulePicker(txtDateTargetSubmit, SafeDbDateOnly(rdr, "Date_TargetSubmit"));
+            SetSchedulePicker(txtDateActualSubmit, SafeDbDateOnly(rdr, "Date_ActualSubmit"));
+            SetSchedulePicker(txtDateTargetApprove, SafeDbDateOnly(rdr, "Date_TargetApprove"));
+            SetSchedulePicker(txtDateActualApprove, SafeDbDateOnly(rdr, "Date_ActualApprove"));
+            SetSchedulePicker(txtDateTargetFD, SafeDbDateOnly(rdr, "Date_Target_FD"));
+            SetSchedulePicker(txtDateActualFD, SafeDbDateOnly(rdr, "Date_Actual_FD"));
+            SetSchedulePicker(txtDateTargetRlsMfr, SafeDbDateOnly(rdr, "Date_TargetRLSMfr"));
+            SetSchedulePicker(txtDateActualRlsMfr, SafeDbDateOnly(rdr, "Date_ActualRlsMfr"));
+            SetSchedulePicker(txtDateTargetFieldReady, SafeDbDateOnly(rdr, "Date_Target_FieldReady"));
+            SetSchedulePicker(txtDateActualFieldReady, SafeDbDateOnly(rdr, "Date_Actual_FieldReady"));
+            SetSchedulePicker(txtDateTargetShip, SafeDbDateOnly(rdr, "Date_TargetShip"));
+            SetSchedulePicker(txtDateActualShip, SafeDbDateOnly(rdr, "Date_ActualShip"));
         }
 
         private void ClearDashEditControls()
@@ -2457,12 +2457,12 @@ namespace IWCCadToolsV9.UI
             SelectComboValue(cboDashUnit, null);
             txtDashFloor.Text = txtDashRoom.Text = txtDashQty.Text = string.Empty;
             txtDashNotes.Text = txtShopNotes.Text = string.Empty;
-            txtDateTargetSubmit.Text = txtDateActualSubmit.Text = string.Empty;
-            txtDateTargetApprove.Text = txtDateActualApprove.Text = string.Empty;
-            txtDateTargetFD.Text = txtDateActualFD.Text = string.Empty;
-            txtDateTargetRlsMfr.Text = txtDateActualRlsMfr.Text = string.Empty;
-            txtDateTargetFieldReady.Text = txtDateActualFieldReady.Text = string.Empty;
-            txtDateTargetShip.Text = txtDateActualShip.Text = string.Empty;
+            SetSchedulePicker(txtDateTargetSubmit, null); SetSchedulePicker(txtDateActualSubmit, null);
+            SetSchedulePicker(txtDateTargetApprove, null); SetSchedulePicker(txtDateActualApprove, null);
+            SetSchedulePicker(txtDateTargetFD, null); SetSchedulePicker(txtDateActualFD, null);
+            SetSchedulePicker(txtDateTargetRlsMfr, null); SetSchedulePicker(txtDateActualRlsMfr, null);
+            SetSchedulePicker(txtDateTargetFieldReady, null); SetSchedulePicker(txtDateActualFieldReady, null);
+            SetSchedulePicker(txtDateTargetShip, null); SetSchedulePicker(txtDateActualShip, null);
         }
 
         private void SaveProjectDashDetails()
@@ -2544,18 +2544,18 @@ namespace IWCCadToolsV9.UI
                     cmd.Parameters.AddWithValue("@Dash_Room", NullIfBlank(txtDashRoom.Text));
                     AddIntParam(cmd, "@Dash_Qty", ParseNullableInt(txtDashQty.Text));
                     cmd.Parameters.AddWithValue("@Dash_Unit", SelectedComboText(cboDashUnit));
-                    AddDateParam(cmd, "@Date_TargetSubmit", txtDateTargetSubmit.Text);
-                    AddDateParam(cmd, "@Date_ActualSubmit", txtDateActualSubmit.Text);
-                    AddDateParam(cmd, "@Date_TargetApprove", txtDateTargetApprove.Text);
-                    AddDateParam(cmd, "@Date_ActualApprove", txtDateActualApprove.Text);
-                    AddDateParam(cmd, "@Date_Target_FD", txtDateTargetFD.Text);
-                    AddDateParam(cmd, "@Date_Actual_FD", txtDateActualFD.Text);
-                    AddDateParam(cmd, "@Date_TargetRLSMfr", txtDateTargetRlsMfr.Text);
-                    AddDateParam(cmd, "@Date_ActualRlsMfr", txtDateActualRlsMfr.Text);
-                    AddDateParam(cmd, "@Date_Target_FieldReady", txtDateTargetFieldReady.Text);
-                    AddDateParam(cmd, "@Date_Actual_FieldReady", txtDateActualFieldReady.Text);
-                    AddDateParam(cmd, "@Date_TargetShip", txtDateTargetShip.Text);
-                    AddDateParam(cmd, "@Date_ActualShip", txtDateActualShip.Text);
+                    AddDateParam(cmd, "@Date_TargetSubmit", txtDateTargetSubmit);
+                    AddDateParam(cmd, "@Date_ActualSubmit", txtDateActualSubmit);
+                    AddDateParam(cmd, "@Date_TargetApprove", txtDateTargetApprove);
+                    AddDateParam(cmd, "@Date_ActualApprove", txtDateActualApprove);
+                    AddDateParam(cmd, "@Date_Target_FD", txtDateTargetFD);
+                    AddDateParam(cmd, "@Date_Actual_FD", txtDateActualFD);
+                    AddDateParam(cmd, "@Date_TargetRLSMfr", txtDateTargetRlsMfr);
+                    AddDateParam(cmd, "@Date_ActualRlsMfr", txtDateActualRlsMfr);
+                    AddDateParam(cmd, "@Date_Target_FieldReady", txtDateTargetFieldReady);
+                    AddDateParam(cmd, "@Date_Actual_FieldReady", txtDateActualFieldReady);
+                    AddDateParam(cmd, "@Date_TargetShip", txtDateTargetShip);
+                    AddDateParam(cmd, "@Date_ActualShip", txtDateActualShip);
                     cmd.Parameters.AddWithValue("@Dash_Notes", NullIfBlank(txtDashNotes.Text));
                     cmd.Parameters.AddWithValue("@Shop_Notes", NullIfBlank(txtShopNotes.Text));
                     cmd.ExecuteNonQuery();
@@ -2651,6 +2651,35 @@ namespace IWCCadToolsV9.UI
                 cmd.Parameters.AddWithValue(name, (object)dt.Date);
             else
                 cmd.Parameters.AddWithValue(name, DBNull.Value);
+        }
+
+        /// <summary>
+        /// Overload for the optional schedule-date pickers (ShowCheckBox = true):
+        /// unchecked -> DBNull, checked -> the selected date.
+        /// </summary>
+        private static void AddDateParam(SqlCommand cmd, string name, DateTimePicker picker)
+        {
+            if (picker.Checked)
+                cmd.Parameters.AddWithValue(name, picker.Value.Date);
+            else
+                cmd.Parameters.AddWithValue(name, DBNull.Value);
+        }
+
+        /// <summary>
+        /// Sets a schedule DateTimePicker (ShowCheckBox = true) from a nullable
+        /// DateOnly: null -> unchecked/empty, value -> checked with that date.
+        /// </summary>
+        private static void SetSchedulePicker(DateTimePicker picker, DateOnly? value)
+        {
+            if (value.HasValue)
+            {
+                picker.Value   = value.Value.ToDateTime(TimeOnly.MinValue);
+                picker.Checked = true;
+            }
+            else
+            {
+                picker.Checked = false;
+            }
         }
 
         private static void AddIntParam(SqlCommand cmd, string name, int? value)
@@ -3421,7 +3450,7 @@ namespace IWCCadToolsV9.UI
             return combo;
         }
 
-        private static TextBox AddScheduleRow(TableLayoutPanel tbl, int row, string label, out TextBox actual)
+        private static DateTimePicker AddScheduleRow(TableLayoutPanel tbl, int row, string label, out DateTimePicker actual)
         {
             tbl.Controls.Add(new Label
             {
@@ -3430,8 +3459,23 @@ namespace IWCCadToolsV9.UI
                 Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 Margin = new Padding(0, 6, 4, 0)
             }, 0, row);
-            var target = new TextBox { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
-            actual = new TextBox { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
+
+            // ShowCheckBox gives an unchecked/grayed picker representing "no date set"
+            // (matches the Approved-checkbox + date picker pattern in the Material editor).
+            var target = new DateTimePicker
+            {
+                Dock = DockStyle.Fill,
+                Format = DateTimePickerFormat.Short,
+                ShowCheckBox = true,
+                Checked = false
+            };
+            actual = new DateTimePicker
+            {
+                Dock = DockStyle.Fill,
+                Format = DateTimePickerFormat.Short,
+                ShowCheckBox = true,
+                Checked = false
+            };
             tbl.Controls.Add(target, 1, row);
             tbl.Controls.Add(actual, 2, row);
             return target;
@@ -3704,18 +3748,18 @@ namespace IWCCadToolsV9.UI
         private TextBox         txtDashRoom = null!;
         private TextBox         txtDashQty = null!;
         private ComboBox        cboDashUnit = null!;
-        private TextBox         txtDateTargetSubmit = null!;
-        private TextBox         txtDateActualSubmit = null!;
-        private TextBox         txtDateTargetApprove = null!;
-        private TextBox         txtDateActualApprove = null!;
-        private TextBox         txtDateTargetFD = null!;
-        private TextBox         txtDateActualFD = null!;
-        private TextBox         txtDateTargetRlsMfr = null!;
-        private TextBox         txtDateActualRlsMfr = null!;
-        private TextBox         txtDateTargetFieldReady = null!;
-        private TextBox         txtDateActualFieldReady = null!;
-        private TextBox         txtDateTargetShip = null!;
-        private TextBox         txtDateActualShip = null!;
+        private DateTimePicker  txtDateTargetSubmit = null!;
+        private DateTimePicker  txtDateActualSubmit = null!;
+        private DateTimePicker  txtDateTargetApprove = null!;
+        private DateTimePicker  txtDateActualApprove = null!;
+        private DateTimePicker  txtDateTargetFD = null!;
+        private DateTimePicker  txtDateActualFD = null!;
+        private DateTimePicker  txtDateTargetRlsMfr = null!;
+        private DateTimePicker  txtDateActualRlsMfr = null!;
+        private DateTimePicker  txtDateTargetFieldReady = null!;
+        private DateTimePicker  txtDateActualFieldReady = null!;
+        private DateTimePicker  txtDateTargetShip = null!;
+        private DateTimePicker  txtDateActualShip = null!;
         private TextBox         txtDashNotes = null!;
         private TextBox         txtShopNotes = null!;
         private TextBox         txtProjNotes = null!;

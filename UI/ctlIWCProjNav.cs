@@ -4,11 +4,13 @@ using IWCCadToolsV9.Data;            // adjust if IWCConn lives under Data or He
 using IWCCadToolsV9.Data.Models;
 using IWCCadToolsV9.Helpers;         // (safe to keep; remove if not used)
 using Microsoft.Data.SqlClient;
+using Microsoft.Web.WebView2.Core;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Windows.Forms;
@@ -37,6 +39,10 @@ namespace IWCCadToolsV9.UI
 
         private ContextMenuStrip? _dashFolderMenu;
         private ToolStripMenuItem? _miDashFolderRefresh;
+
+        // Navigator-level context menu (right-click on empty tree area)
+        private ContextMenuStrip  _navigatorMenu          = new ContextMenuStrip();
+        private ToolStripMenuItem _miReloadFieldMap       = new ToolStripMenuItem("Reload Field Map");
 
         // Project/root child-node context menus
         private ContextMenuStrip  _projectNodeMenu       = new ContextMenuStrip();
@@ -70,6 +76,11 @@ namespace IWCCadToolsV9.UI
         // Tracks the active document's service so we can unsubscribe cleanly
         private ProjectContextService? _currentNavSvc;
 
+        // WebView2 detail pane: CoreWebView2 initializes asynchronously, so HTML set
+        // before it's ready is queued in _pendingDetailHtml and flushed on completion.
+        private bool _detailBrowserReady;
+        private string? _pendingDetailHtml;
+
         // ---- Child node labels (fixed order) ----
         private static readonly string[] ChildNodeNames = new[]
         {
@@ -87,19 +98,10 @@ namespace IWCCadToolsV9.UI
         {
             InitializeComponent();
 
-            // Open hyperlinks (e.g. vendor links rendered by DetailHtmlRenderer) in the
-            // user's default browser instead of navigating the detail pane itself.
-            detailBrowser.Navigating += (s, e) =>
-            {
-                if (e.Url != null && (e.Url.Scheme == Uri.UriSchemeHttp || e.Url.Scheme == Uri.UriSchemeHttps))
-                {
-                    e.Cancel = true;
-                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Url.ToString()) { UseShellExecute = true }); }
-                    catch { /* best-effort */ }
-                }
-            };
-
-            detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Select an item to view details.");
+            // Initialize WebView2 (Chromium-based) for the detail pane, then load
+            // hyperlink interception once the CoreWebView2 environment is ready.
+            // Until then, queued HTML (via SetDetailHtml) is held in _pendingDetailHtml.
+            InitDetailBrowserAsync();
 
             SetupIcons();
             ConfigureTreeEvents();
@@ -108,6 +110,7 @@ namespace IWCCadToolsV9.UI
             InitHardwareContextMenu();
             InitDashFolderContextMenu();
             InitDrawingSeriesContextMenus();
+            InitNavigatorContextMenu();
 
             // Subscribe to document switches so the tree refreshes on each drawing
             Application.DocumentManager.DocumentActivated += OnNavDocumentActivated;
@@ -189,6 +192,22 @@ namespace IWCCadToolsV9.UI
             _dashFolderMenu.Items.Add(_miDashFolderRefresh);
         }
 
+        /// <summary>
+        /// Right-click menu shown on empty tree area (no node under cursor).
+        /// "Reload Field Map" re-reads Resources/DetailFieldMap.json from disk so
+        /// edits to that file take effect immediately without restarting AutoCAD,
+        /// and re-renders the currently selected node's detail pane.
+        /// </summary>
+        private void InitNavigatorContextMenu()
+        {
+            _miReloadFieldMap.Click += (_, _) =>
+            {
+                DetailHtmlRenderer.ReloadFieldMap();
+                ShowNodeDetails(tree.SelectedNode);
+            };
+            _navigatorMenu.Items.Add(_miReloadFieldMap);
+        }
+
         private void InitDrawingSeriesContextMenus()
         {
             _miDsOpenFile.Click += (_, _) => OnDsOpenFile();
@@ -202,6 +221,162 @@ namespace IWCCadToolsV9.UI
             _miDsEditSheet.Click += (_, _) => OnDsEditSheet();
             _drawingSeriesSheetMenu.Items.Add(_miDsEditSheet);
         }
+
+        /// <summary>
+        /// Initializes the WebView2 detail pane's CoreWebView2 environment and wires
+        /// up hyperlink interception. Until initialization completes, HTML passed to
+        /// SetDetailHtml is queued and flushed once ready.
+        ///
+        /// A dedicated UserDataFolder under %LOCALAPPDATA% is used (WebView2 requires
+        /// a writable profile folder; the default location can be problematic inside
+        /// AutoCAD's process).
+        /// </summary>
+        private async void InitDetailBrowserAsync()
+        {
+            if (DesignMode || LicenseManager.UsageMode == LicenseUsageMode.Designtime)
+                return;
+
+            try
+            {
+                string userDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "IWCCadToolsV9", "WebView2");
+
+                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
+                await detailBrowser.EnsureCoreWebView2Async(env);
+
+                // Intercept link clicks and open them in the user's actual default
+                // browser instead of navigating the detail pane itself.
+                detailBrowser.CoreWebView2.NavigationStarting += (s, e) =>
+                {
+                    string url = e.Uri ?? "";
+                    if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                        || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.Cancel = true;
+                        OpenUrlInDefaultBrowser(url);
+                    }
+                };
+
+                _detailBrowserReady = true;
+
+                if (_pendingDetailHtml != null)
+                {
+                    detailBrowser.NavigateToString(_pendingDetailHtml);
+                    _pendingDetailHtml = null;
+                }
+                else
+                {
+                    detailBrowser.NavigateToString(DetailHtmlRenderer.RenderMessage("Select an item to view details."));
+                }
+            }
+            catch (Exception ex)
+            {
+                // WebView2 runtime may not be installed. Show a message in-place
+                // rather than throwing during control construction.
+                _pendingDetailHtml = DetailHtmlRenderer.RenderMessage(
+                    $"Unable to initialize the detail view (WebView2 runtime may be missing): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sets the detail pane's HTML content. If CoreWebView2 isn't ready yet,
+        /// queues the HTML to be shown once initialization completes.
+        /// </summary>
+        private void SetDetailHtml(string html)
+        {
+            if (_detailBrowserReady)
+                detailBrowser.NavigateToString(html);
+            else
+                _pendingDetailHtml = html;
+        }
+
+        /// <summary>
+        /// Opens a URL in the user's actual default web browser.
+        ///
+        /// Both Process.Start(url, UseShellExecute=true) and
+        /// "rundll32 url.dll,FileProtocolHandler" can resolve to Internet Explorer
+        /// regardless of the configured default browser (a long-standing Windows
+        /// quirk — the legacy FileProtocolHandler path for http/https often still
+        /// points at IE even when Edge/Chrome/Firefox is set as default).
+        ///
+        /// To reliably honor the user's actual default browser, read the
+        /// per-user URL association directly from the registry
+        /// (HKCU\...\UrlAssociations\http\UserChoice -> ProgId, then
+        /// HKCR\{ProgId}\shell\open\command -> launch template) and start that
+        /// program with the URL as an argument. This is the same mechanism
+        /// Windows itself uses to resolve "Open with" for http/https links.
+        /// </summary>
+        private static void OpenUrlInDefaultBrowser(string url)
+        {
+            try
+            {
+                string? command = GetDefaultBrowserCommand("https")
+                                ?? GetDefaultBrowserCommand("http");
+
+                if (!string.IsNullOrWhiteSpace(command))
+                {
+                    // command is typically: "C:\Path\To\browser.exe" -- "%1"
+                    // Split the executable path from the argument template, then
+                    // substitute the URL for %1.
+                    string exe;
+                    string args;
+
+                    if (command.StartsWith("\"", StringComparison.Ordinal))
+                    {
+                        int endQuote = command.IndexOf('"', 1);
+                        exe = command.Substring(1, endQuote - 1);
+                        args = command.Substring(endQuote + 1).Trim();
+                    }
+                    else
+                    {
+                        int space = command.IndexOf(' ');
+                        if (space < 0) { exe = command; args = ""; }
+                        else { exe = command.Substring(0, space); args = command.Substring(space + 1).Trim(); }
+                    }
+
+                    args = args.Contains("%1", StringComparison.Ordinal)
+                        ? args.Replace("%1", $"\"{url}\"", StringComparison.Ordinal)
+                        : $"\"{url}\"";
+
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = exe,
+                        Arguments = args,
+                        UseShellExecute = false
+                    });
+                    return;
+                }
+            }
+            catch
+            {
+                // Fall through to the ShellExecute fallback below.
+            }
+
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch { /* best-effort */ }
+        }
+
+        /// <summary>
+        /// Reads the launch command for the user's default browser for the given
+        /// URL scheme ("http" or "https") from the registry. Returns null if no
+        /// association is configured or it can't be resolved.
+        /// </summary>
+        private static string? GetDefaultBrowserCommand(string scheme)
+        {
+            using var userChoiceKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                $@"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\{scheme}\UserChoice");
+
+            string? progId = userChoiceKey?.GetValue("ProgId") as string;
+            if (string.IsNullOrWhiteSpace(progId)) return null;
+
+            // Most browsers register their open command under HKCR\{ProgId}\shell\open\command
+            using var commandKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(
+                $@"{progId}\shell\open\command");
+
+            return commandKey?.GetValue(null) as string;
+        }
+
 
         private void OnDsOpenFile()
         {
@@ -328,7 +503,7 @@ namespace IWCCadToolsV9.UI
         {
             if (node?.Tag == null)
             {
-                detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Select an item to view details.");
+                SetDetailHtml(DetailHtmlRenderer.RenderMessage("Select an item to view details."));
                 return;
             }
 
@@ -336,31 +511,31 @@ namespace IWCCadToolsV9.UI
             {
                 case PlaceholderTag:
                 case LoaderTag:
-                    detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Loading...");
+                    SetDetailHtml(DetailHtmlRenderer.RenderMessage("Loading..."));
                     return;
 
                 case ChildTag ct:
-                    detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage(
-                        $"{ct.ChildLabel}: select a sub-item or expand to load.");
+                    SetDetailHtml(DetailHtmlRenderer.RenderMessage(
+                        $"{ct.ChildLabel}: select a sub-item or expand to load."));
                     return;
 
                 case DashSectionTag st:
-                    detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage(
-                        $"Right-click '{st.Section}' and choose Refresh.");
+                    SetDetailHtml(DetailHtmlRenderer.RenderMessage(
+                        $"Right-click '{st.Section}' and choose Refresh."));
                     return;
 
                 case HdwItemTag hi:
                 {
                     var extra = BuildExtraFieldsForTag(node.Tag);
                     extra["TotalDashQty"] = GetTotalHardwareDashQty(hi.ItemId);
-                    detailBrowser.DocumentText = DetailHtmlRenderer.Render(node.Tag, extra);
+                    SetDetailHtml(DetailHtmlRenderer.Render(node.Tag, extra));
                     return;
                 }
 
                 default:
                 {
                     var extra = BuildExtraFieldsForTag(node.Tag);
-                    detailBrowser.DocumentText = DetailHtmlRenderer.Render(node.Tag, extra);
+                    SetDetailHtml(DetailHtmlRenderer.Render(node.Tag, extra));
                     return;
                 }
             }
@@ -440,7 +615,7 @@ namespace IWCCadToolsV9.UI
                 }
 
                 node.Expand();
-                detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage($"{ct.ChildLabel} refreshed.");
+                SetDetailHtml(DetailHtmlRenderer.RenderMessage($"{ct.ChildLabel} refreshed."));
             }
             catch (Exception ex)
             {
@@ -1288,6 +1463,14 @@ namespace IWCCadToolsV9.UI
                 if (e.Button != MouseButtons.Right) return;
                 tree.SelectedNode = e.Node;
                 ShowNodeContextMenu(e.Node, e.Location);
+            };
+
+            // Right-click on empty tree area (no node) shows navigator-level options
+            tree.MouseUp += (s, e) =>
+            {
+                if (e.Button != MouseButtons.Right) return;
+                if (tree.GetNodeAt(e.Location) != null) return; // handled by NodeMouseClick above
+                _navigatorMenu.Show(tree, e.Location);
             };
 
             // Double-click toggles expand/collapse
@@ -2264,7 +2447,7 @@ namespace IWCCadToolsV9.UI
             tree.CollapseAll();
             tree.EndUpdate();
 
-            detailBrowser.DocumentText = DetailHtmlRenderer.RenderMessage("Design-time preview");
+            SetDetailHtml(DetailHtmlRenderer.RenderMessage("Design-time preview"));
         }
 
         #endregion

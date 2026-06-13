@@ -42,6 +42,7 @@
   <!-- NuGet packages -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
   </ItemGroup>
 
   <!-- AutoCAD 2025 managed API references -->

@@ -53,6 +53,10 @@
             "Microsoft.Data.SqlClient": {
               "target": "Package",
               "version": "[6.1.0, )"
+            },
+            "Microsoft.Web.WebView2": {
+              "target": "Package",
+              "version": "[1.0.2592.51, )"
             }
           },
           "imports": [
